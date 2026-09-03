@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${REDLINE_PORT:-3000}:3000"
+    volumes:
+      # The whole database is one SQLite file in here. To keep it somewhere you
+      # can see and copy, swap this for a bind mount: ./data:/data
+      - redline-data:/data
+    restart: unless-stopped
+
+volumes:
+  redline-data:
