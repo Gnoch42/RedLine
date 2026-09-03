@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { CodeCard } from './CodeCard.jsx';
+import { CountrySelect } from './CountrySelect.jsx';
 
 const joinLink = (code) => `${window.location.origin}/?join=${encodeURIComponent(code)}`;
 
@@ -218,7 +219,66 @@ function Codes({ user }) {
   );
 }
 
-function Delegations({ user, data }) {
+/** Your own account: the name and country that follow you between committees. */
+function Account({ user, onSaved }) {
+  const [values, setValues] = useState({
+    delegate_name: user.delegate_name,
+    country: user.country || '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  const dirty = values.delegate_name !== user.delegate_name || values.country !== (user.country || '');
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/auth/me', { method: 'PATCH', body: values });
+      setSaved(true);
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
+      <span className="label">Your account</span>
+      <Error message={error} />
+      <label className="field" style={{ marginTop: 8 }}>
+        <span className="label">Name</span>
+        <input
+          value={values.delegate_name}
+          onChange={(e) => { setValues((v) => ({ ...v, delegate_name: e.target.value })); setSaved(false); }}
+        />
+      </label>
+      <div className="field">
+        <span className="label">The country you represent</span>
+        <CountrySelect
+          value={values.country}
+          onChange={(country) => { setValues((v) => ({ ...v, country })); setSaved(false); }}
+        />
+        <span className="hint">
+          The default when you register a delegation. Changing it leaves the delegations you
+          already hold untouched.
+        </span>
+      </div>
+      <button
+        className="btn"
+        onClick={save}
+        disabled={busy || !dirty || !values.delegate_name.trim() || !values.country.trim()}
+      >
+        {busy ? 'Saving…' : saved && !dirty ? 'Saved ✓' : 'Save'}
+      </button>
+    </div>
+  );
+}
+
+function Delegations({ user, data, onSaved }) {
   return (
     <>
       <span className="label">Delegations registered</span>
@@ -243,12 +303,17 @@ function Delegations({ user, data }) {
           {(data?.delegates || []).map((delegate) => (
             <div className="row" key={delegate.id}>
               <strong>{delegate.delegate_name}</strong>
+              {delegate.country && delegate.country !== user.team.country_name && (
+                <span className="label">{delegate.country}</span>
+              )}
               <span className="spacer" />
               <code>{delegate.email}</code>
             </div>
           ))}
         </div>
       </div>
+
+      <Account user={user} onSaved={onSaved} />
     </>
   );
 }
@@ -280,7 +345,7 @@ export function CommitteeModal({ user, onClose, onChanged, initialTab = 'codes' 
       {tab === 'codes' && <Codes user={user} />}
       {tab === 'agenda' && <Agenda committee={user.committee} onChanged={onChanged} />}
       {tab === 'settings' && <Settings committee={user.committee} onSaved={onChanged} />}
-      {tab === 'delegations' && <Delegations user={user} data={data} />}
+      {tab === 'delegations' && <Delegations user={user} data={data} onSaved={onChanged} />}
     </Modal>
   );
 }

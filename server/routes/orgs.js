@@ -122,7 +122,7 @@ orgRoutes.get('/committees/:id', requireTeam, (req, res) => {
     cttee.id
   );
   const delegates = all(
-    `SELECT u.id, u.email, u.delegate_name
+    `SELECT u.id, u.email, u.delegate_name, u.country
        FROM memberships m
        JOIN users u ON u.id = m.user_id
       WHERE m.team_id = ? ORDER BY u.delegate_name`,

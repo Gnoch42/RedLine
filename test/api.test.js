@@ -15,16 +15,16 @@ before(async () => {
 
 after(() => server.stop());
 
-async function register(email, name) {
+async function register(email, name, country = 'France') {
   const { token } = await api('/api/auth/register', {
     method: 'POST',
-    body: { email, delegate_name: name },
+    body: { email, delegate_name: name, country },
   });
   return token;
 }
 
 async function delegation(email, name, country) {
-  const token = await register(email, name);
+  const token = await register(email, name, country);
   const { user } = await api('/api/teams', {
     method: 'POST',
     token,
@@ -34,7 +34,7 @@ async function delegation(email, name, country) {
 }
 
 test('a delegate registers, founds a committee and gets both codes', async () => {
-  s.france = { token: await register('camille@example.org', 'Camille') };
+  s.france = { token: await register('camille@example.org', 'Camille', 'France') };
   await api('/api/committees', {
     method: 'POST',
     token: s.france.token,
@@ -70,7 +70,7 @@ test('other countries register their own delegations in that committee', async (
 
   const dup = await api('/api/teams', {
     method: 'POST',
-    token: await register('lea@example.org', 'Léa'),
+    token: await register('lea@example.org', 'Léa', 'France'),
     body: { committee_code: s.committeeCode, country_name: 'france' },
     expect: 409,
   });
@@ -78,7 +78,7 @@ test('other countries register their own delegations in that committee', async (
 });
 
 test('a second delegate joins an existing delegation with its join code', async () => {
-  const token = await register('theo@example.org', 'Théo');
+  const token = await register('theo@example.org', 'Théo', 'France');
   const { user } = await api('/api/teams/join', {
     method: 'POST', token, body: { join_code: s.france.joinCode },
   });
@@ -98,7 +98,36 @@ test('login is an email plus the delegation\'s shared join code', async () => {
     method: 'POST', body: { email: 'nobody@example.org', join_code: s.germany.joinCode }, expect: 404,
   });
   await api('/api/auth/register', {
-    method: 'POST', body: { email: 'jonas@example.org', delegate_name: 'Jonas again' }, expect: 409,
+    method: 'POST',
+    body: { email: 'jonas@example.org', delegate_name: 'Jonas again', country: 'Germany' },
+    expect: 409,
+  });
+});
+
+test('an account carries the country its delegate represents', async () => {
+  const token = await register('nadia@example.org', 'Nadia', 'Holy See');
+  const { user } = await api('/api/auth/me', { token });
+  assert.equal(user.country, 'Holy See');
+
+  // It is a default, not a cage: the same delegate can speak for someone else
+  // on another committee.
+  const { user: seated } = await api('/api/teams', {
+    method: 'POST', token,
+    body: { committee_code: s.committeeCode, country_name: 'Sovereign Order of Malta' },
+  });
+  assert.equal(seated.team.country_name, 'Sovereign Order of Malta');
+  assert.equal(seated.country, 'Holy See');
+
+  // And it can be corrected afterwards without touching the seats already held.
+  const { user: fixed } = await api('/api/auth/me', {
+    method: 'PATCH', token, body: { delegate_name: 'Nadia Haddad', country: 'State of Palestine' },
+  });
+  assert.equal(fixed.country, 'State of Palestine');
+  assert.equal(fixed.delegate_name, 'Nadia Haddad');
+  assert.equal(fixed.seats[0].country_name, 'Sovereign Order of Malta');
+
+  await api('/api/auth/register', {
+    method: 'POST', body: { email: 'nocountry@example.org', delegate_name: 'Pat' }, expect: 400,
   });
 });
 
@@ -366,7 +395,7 @@ test('any two versions can be fetched for comparison', async () => {
 });
 
 test('committee membership is a wall: outsiders see nothing', async () => {
-  const outsiderToken = await register('sam@example.org', 'Sam');
+  const outsiderToken = await register('sam@example.org', 'Sam', 'Norway');
   await api('/api/committees', {
     method: 'POST', token: outsiderToken,
     body: { name: 'UNESCO', description: '', total_members: 10, country_name: 'Norway' },
@@ -378,7 +407,7 @@ test('committee membership is a wall: outsiders see nothing', async () => {
 
 test('unauthenticated and seatless requests are turned away', async () => {
   await api(`/api/propositions/${s.propId}`, { expect: 401 });
-  const lonely = await register('kim@example.org', 'Kim');
+  const lonely = await register('kim@example.org', 'Kim', 'Japan');
   await api(`/api/propositions/${s.propId}`, { token: lonely, expect: 403 });
 });
 

@@ -19,18 +19,23 @@ function normalizeEmail(body) {
 }
 
 /**
- * An account is a person, not a seat: name and email only. Which country they
- * speak for, on which committee, comes from the delegation codes they present
- * afterwards — and they can hold several.
+ * An account is a person: name, email, and the country they represent. The
+ * country is picked from a list rather than typed, and carries over as the
+ * default whenever they register a delegation — a delegate who sits on several
+ * committees can still speak for someone else on one of them.
  */
 authRoutes.post('/register', (req, res) => {
   const email = normalizeEmail(req.body);
   const delegateName = str(req.body, 'delegate_name', { max: 120 });
+  const country = str(req.body, 'country', { max: 120 });
 
   if (one('SELECT id FROM users WHERE email = ?', email)) {
     throw conflict('There is already an account with that email — sign in with it instead.');
   }
-  const info = run('INSERT INTO users (email, delegate_name) VALUES (?, ?)', email, delegateName);
+  const info = run(
+    'INSERT INTO users (email, delegate_name, country) VALUES (?, ?, ?)',
+    email, delegateName, country
+  );
   const token = createSession(Number(info.lastInsertRowid));
   res.status(201).json({ token, user: serializeUser(userFromToken(token)) });
 });
@@ -62,6 +67,15 @@ authRoutes.post('/logout', requireUser, (req, res) => {
 
 authRoutes.get('/me', requireUser, (req, res) => {
   res.json({ user: serializeUser(req.user) });
+});
+
+/** Correct your own name or country — the country picked at sign-up sticks. */
+authRoutes.patch('/me', requireUser, (req, res) => {
+  const delegateName = str(req.body, 'delegate_name', { max: 120 });
+  const country = str(req.body, 'country', { max: 120 });
+  run('UPDATE users SET delegate_name = ?, country = ? WHERE id = ?',
+    delegateName, country, req.user.id);
+  res.json({ user: serializeUser(userFromToken(req.token)) });
 });
 
 /** Move to another committee this delegate already has a seat on. */

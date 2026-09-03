@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   email         TEXT    NOT NULL UNIQUE,
   delegate_name TEXT    NOT NULL,
+  -- The country this delegate represents, chosen from a list at sign-up. It is
+  -- the default when they register a delegation, so nobody files one under a
+  -- mistyped name; a delegate on several committees can still override it.
+  country       TEXT    NOT NULL DEFAULT '',
   created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

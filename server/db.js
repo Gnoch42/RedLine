@@ -72,6 +72,16 @@ function migrate() {
     }
   }
 
+  if (!columnsOf('users').includes('country')) {
+    db.exec("ALTER TABLE users ADD COLUMN country TEXT NOT NULL DEFAULT ''");
+    // Seed it from the delegation they are already in, so an existing delegate
+    // is not asked to pick a country they have effectively already chosen.
+    db.exec(`UPDATE users SET country = COALESCE((
+               SELECT t.country_name FROM memberships m
+                 JOIN teams t ON t.id = m.team_id
+                WHERE m.user_id = users.id ORDER BY m.id LIMIT 1), '')`);
+  }
+
   if (!columnsOf('sessions').includes('active_team_id')) {
     db.exec('ALTER TABLE sessions ADD COLUMN active_team_id INTEGER REFERENCES teams(id)');
     // Best effort: put each open session back in the delegation it was in.

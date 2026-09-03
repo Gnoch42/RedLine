@@ -48,8 +48,8 @@ async function preflight() {
   console.log(`Seeding ${BASE} (database: ${health.db})`);
 }
 
-const register = async (email, name) =>
-  (await call('/auth/register', { method: 'POST', body: { email, delegate_name: name } })).token;
+const register = async (email, name, country) =>
+  (await call('/auth/register', { method: 'POST', body: { email, delegate_name: name, country } })).token;
 
 const TEXT = `The Committee,
 
@@ -74,7 +74,7 @@ const RIVAL = TEXT.replace(
 const main = async () => {
   await preflight();
 
-  const founder = await register(`camille.${stamp}@example.org`, 'Camille Fournier');
+  const founder = await register(`camille.${stamp}@example.org`, 'Camille Fournier', 'France');
   await call('/committees', {
     method: 'POST', token: founder,
     body: {
@@ -94,7 +94,7 @@ const main = async () => {
     ['India', 'Ravi Menon'], ['Japan', 'Aiko Tanaka'],
   ]) {
     const email = `${delegate.split(' ')[0].toLowerCase()}.${stamp}@example.org`;
-    const token = await register(email, delegate);
+    const token = await register(email, delegate, country);
     const { user } = await call('/teams', {
       method: 'POST', token, body: { committee_code: committeeCode, country_name: country },
     });
@@ -104,7 +104,7 @@ const main = async () => {
 
   // A second delegate on the French desk, to show that a delegation shares its
   // drafts and its join code.
-  const colleague = await register(`theo.${stamp}@example.org`, 'Théo Marchand');
+  const colleague = await register(`theo.${stamp}@example.org`, 'Théo Marchand', 'France');
   await call('/teams/join', {
     method: 'POST', token: colleague, body: { join_code: fr.team.join_code },
   });

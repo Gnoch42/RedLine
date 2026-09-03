@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api, setToken } from '../api.js';
 import { Wordmark } from './bits.jsx';
 import { CodeCard } from './CodeCard.jsx';
+import { CountrySelect } from './CountrySelect.jsx';
 
 const joinLink = (code) => `${window.location.origin}/?join=${encodeURIComponent(code)}`;
 
@@ -32,11 +33,12 @@ function useSubmit(handler) {
  */
 function Credentials({ onAuthenticated, prefillJoinCode }) {
   const [mode, setMode] = useState(prefillJoinCode ? 'login' : 'register');
+  const [country, setCountry] = useState('');
 
   const form = useSubmit(async (data) => {
     const path = mode === 'register' ? '/auth/register' : '/auth/login';
     const body = mode === 'register'
-      ? { delegate_name: data.get('delegate_name'), email: data.get('email') }
+      ? { delegate_name: data.get('delegate_name'), email: data.get('email'), country }
       : { email: data.get('email'), join_code: data.get('join_code') };
     const result = await api(path, { method: 'POST', body });
     setToken(result.token);
@@ -53,10 +55,20 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
       </p>
 
       {mode === 'register' && (
-        <label className="field">
-          <span className="label">Your name</span>
-          <input name="delegate_name" required placeholder="Camille Fournier" autoComplete="name" />
-        </label>
+        <>
+          <label className="field">
+            <span className="label">Your name</span>
+            <input name="delegate_name" required placeholder="Camille Fournier" autoComplete="name" />
+          </label>
+          <div className="field">
+            <span className="label">The country you represent</span>
+            <CountrySelect value={country} onChange={setCountry} />
+            <span className="hint">
+              Filled in for you whenever you register a delegation, so nobody ends up filed under
+              a country they did not mean.
+            </span>
+          </div>
+        </>
       )}
 
       <label className="field">
@@ -82,7 +94,11 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
 
       {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
 
-      <button type="submit" className="btn btn--primary btn--block" disabled={form.busy}>
+      <button
+        type="submit"
+        className="btn btn--primary btn--block"
+        disabled={form.busy || (mode === 'register' && !country.trim())}
+      >
         {form.busy ? 'Working…' : mode === 'register' ? 'Create account' : 'Sign in'}
       </button>
 
@@ -119,12 +135,13 @@ function JoinDelegation({ onUser, prefillJoinCode }) {
   );
 }
 
-function AddDelegation({ onUser }) {
+function AddDelegation({ me, onUser }) {
   const [preview, setPreview] = useState(null);
+  const [country, setCountry] = useState(me?.country || '');
   const form = useSubmit(async (data) => {
     const { user } = await api('/teams', {
       method: 'POST',
-      body: { committee_code: data.get('committee_code'), country_name: data.get('country_name') },
+      body: { committee_code: data.get('committee_code'), country_name: country },
     });
     onUser(user);
   });
@@ -152,17 +169,30 @@ function AddDelegation({ onUser }) {
           of {preview.committee.total_members} seats.
         </div>
       )}
-      <label className="field">
+      <div className="field">
         <span className="label">Your country</span>
-        <input name="country_name" required placeholder="France" />
-      </label>
+        <CountrySelect
+          value={country}
+          onChange={setCountry}
+          taken={(preview?.teams || []).map((t) => t.country_name)}
+        />
+        {me?.country && country !== me.country && (
+          <span className="hint">
+            Your account says {me.country}. Change it here only if you speak for someone else on
+            this committee.
+          </span>
+        )}
+      </div>
       {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
-      <button className="btn btn--primary btn--block" disabled={form.busy}>Register delegation</button>
+      <button className="btn btn--primary btn--block" disabled={form.busy || !country.trim()}>
+        Register delegation
+      </button>
     </form>
   );
 }
 
-function CreateCommittee({ onUser }) {
+function CreateCommittee({ me, onUser }) {
+  const [country, setCountry] = useState(me?.country || '');
   const form = useSubmit(async (data) => {
     const { user } = await api('/committees', {
       method: 'POST',
@@ -170,7 +200,7 @@ function CreateCommittee({ onUser }) {
         name: data.get('name'),
         description: data.get('description'),
         total_members: Number(data.get('total_members')),
-        country_name: data.get('country_name'),
+        country_name: country,
         projects: String(data.get('projects') || '').split('\n').map((s) => s.trim()).filter(Boolean),
       },
     });
@@ -195,10 +225,10 @@ function CreateCommittee({ onUser }) {
           20% needed to present a proposition. You can correct it later.
         </span>
       </label>
-      <label className="field">
+      <div className="field">
         <span className="label">Your country</span>
-        <input name="country_name" required placeholder="France" />
-      </label>
+        <CountrySelect value={country} onChange={setCountry} />
+      </div>
       <label className="field">
         <span className="label">Agenda items</span>
         <textarea name="projects" rows="3" style={{ fontFamily: 'var(--sans)', fontSize: 14, minHeight: 80 }}
@@ -206,7 +236,9 @@ function CreateCommittee({ onUser }) {
         <span className="hint">One per line. You can add more later.</span>
       </label>
       {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
-      <button className="btn btn--primary btn--block" disabled={form.busy}>Open the committee</button>
+      <button className="btn btn--primary btn--block" disabled={form.busy || !country.trim()}>
+        Open the committee
+      </button>
     </form>
   );
 }
@@ -297,7 +329,8 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
           <>
             <h2>Take your seat</h2>
             <p className="lead">
-              Signed in as <strong>{me.delegate_name}</strong> ({me.email}).
+              Signed in as <strong>{me.delegate_name}</strong>
+              {me.country ? <> for <strong>{me.country}</strong></> : null} ({me.email}).
             </p>
             <div className="lobby__tabs" role="tablist">
               <button role="tab" aria-selected={tab === 'join'} onClick={() => setTab('join')}>
@@ -311,8 +344,8 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
               </button>
             </div>
             {tab === 'join' && <JoinDelegation onUser={acceptUser} prefillJoinCode={prefillJoinCode} />}
-            {tab === 'add' && <AddDelegation onUser={acceptUser} />}
-            {tab === 'create' && <CreateCommittee onUser={acceptUser} />}
+            {tab === 'add' && <AddDelegation me={me} onUser={acceptUser} />}
+            {tab === 'create' && <CreateCommittee me={me} onUser={acceptUser} />}
             {seats.length > 0 && (
               <div className="lobby__switch">
                 <button type="button" onClick={() => setSeatingElsewhere(false)}>

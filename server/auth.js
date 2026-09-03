@@ -36,7 +36,7 @@ export function isMember(userId, teamId) {
 export function userFromToken(token) {
   if (!token) return null;
   return one(
-    `SELECT u.id, u.email, u.delegate_name,
+    `SELECT u.id, u.email, u.delegate_name, u.country,
             s.active_team_id AS team_id,
             t.country_name, t.join_code, t.committee_id,
             c.name AS committee_name, c.description AS committee_description,
@@ -96,6 +96,7 @@ export function serializeUser(user) {
     id: user.id,
     email: user.email,
     delegate_name: user.delegate_name,
+    country: user.country,
     seats: seatsOf(user.id),
     team: user.team_id
       ? {

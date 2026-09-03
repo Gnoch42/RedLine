@@ -62,10 +62,12 @@ REDLINE_URL=http://localhost:8080 npm run seed
 
 ## How a simulation gets set up
 
-An account is a **person**: a name and an email, nothing about countries or committees.
-Which country you speak for, on which committee, comes from the codes you present — and
-one account can hold as many of those seats as you like, which is the usual case when the
-same delegate sits on several committees.
+An account is a **person**: a name, an email, and the country they represent. The country
+is chosen from a list — the 193 UN member states, with observers grouped at the top and a
+free-text option for any observer not listed — never typed, so no delegation ends up filed
+under a misspelling. It carries over as the default every time that delegate registers a
+delegation, and can still be overridden: one account holds as many seats as you like,
+which is the usual case when the same delegate sits on several committees.
 
 There are two codes, and they do different jobs.
 
@@ -77,10 +79,13 @@ There are two codes, and they do different jobs.
    the password: signing in is an email plus that code. Codes can be copied or scanned as
    a QR.
 
+When you register a country on a committee, the ones already taken are shown but cannot be
+picked, so the clash is visible before you submit.
+
 Everyone seated on a committee can correct its settings afterwards — its name, its
-description, the seat count behind the 20% threshold, and the agenda itself. There is no
-organiser account and no moderator; nothing in the app requires elevated privileges, by
-design.
+description, the seat count behind the 20% threshold, and the agenda itself — and your own
+name and country under Committee → Delegations. There is no organiser account and no
+moderator; nothing in the app requires elevated privileges, by design.
 
 ## The rules the app enforces
 
@@ -138,6 +143,14 @@ Places where the build spec was silent, or where the implementation makes a call
 - **Propositions and amendments have a title and no description.** A title that says what
   the text does carries the explorer card on its own; a second summary field was one more
   thing to write and to keep true.
+- **Countries are picked from a list, never typed**, and the list is a plain file —
+  `client/src/lib/countries.js`. A conference that uses the long UN protocol forms, or that
+  seats observers of its own, edits that one file. The server stores whatever is chosen as
+  free text, so the list is a guardrail in the interface rather than a rule the data
+  enforces.
+- **The account's country is a default, not a constraint.** A delegate who speaks for
+  someone else on another committee changes it there, and the seats they already hold are
+  untouched.
 - **`total_members` lives only on the committee.** The spec listed it on both `Team` and
   `Committee`; storing the same number twice only invites drift.
 - **Draft privacy is per user, so propositions and amendments carry an author user**
@@ -170,7 +183,7 @@ server/           Express API. routes/ is thin; model.js holds the rules above.
   schema.sql      The whole database, applied at boot.
   db.js           Opens it, and migrates one written by an earlier build.
 client/src/       React app. components/ is the three-panel UI, lib/ the diff,
-                  Markdown rendering and polling helpers.
+                  Markdown rendering, polling helpers and the country list.
 test/             HTTP-level tests of the business rules.
 scripts/seed.js   The worked example.
 ```
@@ -178,10 +191,11 @@ scripts/seed.js   The worked example.
 ### API
 
 ```
-POST   /api/auth/register              { delegate_name, email }
+POST   /api/auth/register              { delegate_name, email, country }
 POST   /api/auth/login                 { email, join_code }   -> seats you in that delegation
 POST   /api/auth/logout
 GET    /api/auth/me                    the delegate, their seats, the active one
+PATCH  /api/auth/me                    { delegate_name, country }
 POST   /api/auth/switch                { team_id }  move to another of your seats
 
 POST   /api/committees                 create a committee and its first delegation
