@@ -86,7 +86,7 @@ const main = async () => {
     },
   });
   const { user: fr } = await call('/auth/me', { token: founder });
-  const committeeCode = fr.committee.committee_code;
+  const committeeId = fr.committee.id;
 
   const delegations = { France: { token: founder, user: fr } };
   for (const [country, delegate] of [
@@ -96,7 +96,7 @@ const main = async () => {
     const email = `${delegate.split(' ')[0].toLowerCase()}.${stamp}@example.org`;
     const token = await register(email, delegate, country);
     const { user } = await call('/teams', {
-      method: 'POST', token, body: { committee_code: committeeCode, country_name: country },
+      method: 'POST', token, body: { committee_id: committeeId, country_name: country },
     });
     delegations[country] = { token, user };
   }
@@ -165,8 +165,9 @@ const main = async () => {
     if (country === 'France') continue;
     console.log(line(user.email, user.team.join_code, country));
   }
-  console.log(`\nCommittee code, to add more countries: ${committeeCode}`);
-  console.log(`Open ${BASE}\n`);
+  console.log('\nMore countries need no code: they pick the committee from the list after');
+  console.log('creating an account.');
+  console.log(`\nOpen ${BASE}\n`);
 };
 
 main().catch((err) => {
