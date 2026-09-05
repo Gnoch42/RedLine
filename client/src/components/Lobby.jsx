@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, setToken } from '../api.js';
 import { Wordmark } from './bits.jsx';
 import { CodeCard } from './CodeCard.jsx';
@@ -135,59 +135,147 @@ function JoinDelegation({ onUser, prefillJoinCode }) {
   );
 }
 
-function AddDelegation({ me, onUser }) {
-  const [preview, setPreview] = useState(null);
+/**
+ * The committees on this instance, to be picked from rather than reached with a
+ * code. Registering is then one choice — the country comes from the account.
+ */
+function JoinCommittee({ me, onUser, onSwitched }) {
+  const [committees, setCommittees] = useState(null);
+  const [filter, setFilter] = useState('');
+  const [chosen, setChosen] = useState(null);
   const [country, setCountry] = useState(me?.country || '');
-  const form = useSubmit(async (data) => {
-    const { user } = await api('/teams', {
-      method: 'POST',
-      body: { committee_code: data.get('committee_code'), country_name: country },
-    });
-    onUser(user);
-  });
+  const [changing, setChanging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
-  const lookup = async (code) => {
-    setPreview(null);
-    if (!code || code.length < 4) return;
-    try {
-      const found = await api(`/committees/lookup?code=${encodeURIComponent(code)}`);
-      setPreview(found);
-    } catch { /* nothing found yet — stay quiet while they type */ }
+  useEffect(() => {
+    api('/committees')
+      .then(({ committees: list }) => setCommittees(list))
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const choose = (committee) => {
+    setError(null);
+    // Already seated here: this is a way back in, not a second delegation.
+    if (committee.my_team_id) {
+      onSwitched(committee.my_team_id);
+      return;
+    }
+    setChosen(committee);
+    setChanging(false);
+    const taken = committee.taken_countries.map((c) => c.toLowerCase());
+    setCountry(taken.includes((me?.country || '').toLowerCase()) ? '' : (me?.country || ''));
   };
 
-  return (
-    <form onSubmit={form.onSubmit}>
-      <label className="field">
-        <span className="label">Committee code</span>
-        <input name="committee_code" required placeholder="7KQP-2MTX" onBlur={(e) => lookup(e.target.value)}
-               style={{ fontFamily: 'var(--mono)', letterSpacing: '0.06em' }} />
-        <span className="hint">From whoever set up the committee.</span>
-      </label>
-      {preview && (
-        <div className="notice" style={{ marginBottom: 14, borderLeftColor: 'var(--insert)', background: 'var(--insert-soft)', color: '#14543f' }}>
-          <strong>{preview.committee.name}</strong> — {preview.teams.length} delegation(s) registered
-          of {preview.committee.total_members} seats.
+  const join = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { user } = await api('/teams', {
+        method: 'POST',
+        body: { committee_id: chosen.id, country_name: country },
+      });
+      onUser(user);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  if (error && !committees) return <div className="notice">{error}</div>;
+  if (!committees) return <p className="lead">Looking for committees…</p>;
+
+  if (committees.length === 0) {
+    return (
+      <p className="lead">
+        No committees have been set up yet. Start the first one on the next tab — whoever comes
+        after you will find it here.
+      </p>
+    );
+  }
+
+  if (chosen) {
+    const mine = (me?.country || '').trim();
+    const taken = chosen.taken_countries.map((c) => c.toLowerCase());
+    const clash = mine && taken.includes(mine.toLowerCase());
+    return (
+      <>
+        <div className="chosen">
+          <div className="chosen__name">{chosen.name}</div>
+          {chosen.description && <div className="chosen__desc">{chosen.description}</div>}
+          <div className="chosen__meta">
+            {chosen.registered_teams} of {chosen.total_members} seats registered
+          </div>
         </div>
-      )}
-      <div className="field">
-        <span className="label">Your country</span>
-        <CountrySelect
-          value={country}
-          onChange={setCountry}
-          taken={(preview?.teams || []).map((t) => t.country_name)}
-        />
-        {me?.country && country !== me.country && (
-          <span className="hint">
-            Your account says {me.country}. Change it here only if you speak for someone else on
-            this committee.
-          </span>
+
+        {clash && !changing && (
+          <div className="notice" style={{ marginBottom: 12 }}>
+            {mine} already has a delegation on this committee. Ask them for their join code to
+            sit with them, or register under a different country here.
+          </div>
         )}
+
+        {changing || !country ? (
+          <div className="field">
+            <span className="label">Register as</span>
+            <CountrySelect
+              value={country}
+              onChange={setCountry}
+              taken={chosen.taken_countries}
+            />
+          </div>
+        ) : (
+          <p className="lead" style={{ marginBottom: 14 }}>
+            You will be registered as <strong>{country}</strong>.{' '}
+            <button type="button" className="linky" onClick={() => setChanging(true)}>
+              Represent someone else
+            </button>
+          </p>
+        )}
+
+        {error && <div className="notice" style={{ marginBottom: 12 }}>{error}</div>}
+
+        <button className="btn btn--primary btn--block" onClick={join} disabled={busy || !country.trim()}>
+          {busy ? 'Joining…' : `Join ${chosen.name}`}
+        </button>
+        <div className="lobby__switch">
+          <button type="button" onClick={() => setChosen(null)}>Back to the list</button>
+        </div>
+      </>
+    );
+  }
+
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? committees.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(needle))
+    : committees;
+
+  return (
+    <>
+      {committees.length > 6 && (
+        <label className="field">
+          <span className="label">Find a committee</span>
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="UNDP" />
+        </label>
+      )}
+
+      <div className="seats">
+        {shown.map((committee) => (
+          <button key={committee.id} className="seat seat--committee" onClick={() => choose(committee)}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span className="seat__country">{committee.name}</span>
+              {committee.description && <span className="seat__desc">{committee.description}</span>}
+            </span>
+            <span className="seat__committee">
+              {committee.my_team_id
+                ? 'you are seated here'
+                : `${committee.registered_teams}/${committee.total_members} seats`}
+            </span>
+          </button>
+        ))}
+        {shown.length === 0 && <p className="lead">Nothing matches “{filter}”.</p>}
       </div>
-      {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
-      <button className="btn btn--primary btn--block" disabled={form.busy || !country.trim()}>
-        Register delegation
-      </button>
-    </form>
+    </>
   );
 }
 
@@ -244,13 +332,12 @@ function CreateCommittee({ me, onUser }) {
 }
 
 /** The seats this delegate already holds, when there is a choice to make. */
-function SeatPicker({ me, onEnter, onElsewhere }) {
+function SeatPicker({ me, onSit, onElsewhere }) {
   const [busy, setBusy] = useState(null);
   const enter = async (seat) => {
     setBusy(seat.team_id);
     try {
-      const { user } = await api('/auth/switch', { method: 'POST', body: { team_id: seat.team_id } });
-      onEnter(user);
+      await onSit(seat.team_id);
     } finally {
       setBusy(null);
     }
@@ -278,7 +365,7 @@ function SeatPicker({ me, onEnter, onElsewhere }) {
 
 export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSeating = false }) {
   const [me, setMe] = useState(initialUser || null);
-  const [tab, setTab] = useState(prefillJoinCode ? 'join' : 'create');
+  const [tab, setTab] = useState(prefillJoinCode ? 'code' : 'browse');
   const [handover, setHandover] = useState(null);
   // Set when a delegate with existing seats asks to take another one.
   const [seatingElsewhere, setSeatingElsewhere] = useState(startSeating);
@@ -287,6 +374,12 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
     setMe(user);
     if (immediate) onEnter(user);
     else setHandover(user);
+  };
+
+  /** Sit down in a seat this delegate already holds. */
+  const switchSeat = async (teamId) => {
+    const { user } = await api('/auth/switch', { method: 'POST', body: { team_id: teamId } });
+    onEnter(user);
   };
 
   const seats = me?.seats || [];
@@ -322,7 +415,7 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
         )}
 
         {choosing && (
-          <SeatPicker me={me} onEnter={onEnter} onElsewhere={() => setSeatingElsewhere(true)} />
+          <SeatPicker me={me} onSit={switchSeat} onElsewhere={() => setSeatingElsewhere(true)} />
         )}
 
         {seating && (
@@ -333,20 +426,23 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
               {me.country ? <> for <strong>{me.country}</strong></> : null} ({me.email}).
             </p>
             <div className="lobby__tabs" role="tablist">
-              <button role="tab" aria-selected={tab === 'join'} onClick={() => setTab('join')}>
-                Join a delegation
+              <button role="tab" aria-selected={tab === 'browse'} onClick={() => setTab('browse')}>
+                Join a committee
               </button>
-              <button role="tab" aria-selected={tab === 'add'} onClick={() => setTab('add')}>
-                Register your country
+              <button role="tab" aria-selected={tab === 'code'} onClick={() => setTab('code')}>
+                Use a join code
               </button>
               <button role="tab" aria-selected={tab === 'create'} onClick={() => setTab('create')}>
                 Start a committee
               </button>
             </div>
-            {tab === 'join' && <JoinDelegation onUser={acceptUser} prefillJoinCode={prefillJoinCode} />}
-            {tab === 'add' && <AddDelegation me={me} onUser={acceptUser} />}
+            {tab === 'browse' && (
+              <JoinCommittee me={me} onUser={acceptUser} onSwitched={switchSeat} />
+            )}
+            {tab === 'code' && <JoinDelegation onUser={acceptUser} prefillJoinCode={prefillJoinCode} />}
             {tab === 'create' && <CreateCommittee me={me} onUser={acceptUser} />}
-            {seats.length > 0 && (
+            {/* When the app itself sent us here, its own "go back" is the way out. */}
+            {seats.length > 0 && !onCancel && (
               <div className="lobby__switch">
                 <button type="button" onClick={() => setSeatingElsewhere(false)}>
                   Back to my committees
@@ -358,17 +454,17 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
 
         {handover && (
           <>
-            <h2>Codes to hand out</h2>
-            <p className="lead">Write these down now — they are how everyone else gets in.</p>
+            <h2>One code to hand out</h2>
+            <p className="lead">Write it down now — it is how your fellow delegates get in.</p>
             <CodeCard
               code={handover.team.join_code}
               link={joinLink(handover.team.join_code)}
               what={`Your delegation (${handover.team.country_name}). Give it to your fellow delegates — it is also what they sign in with.`}
             />
-            <CodeCard
-              code={handover.committee.committee_code}
-              what={`${handover.committee.name}. Give it to the other countries so they can register their own delegation.`}
-            />
+            <p className="lead">
+              The other countries need nothing from you: {handover.committee.name} is now in the
+              list of committees they see when they sign in.
+            </p>
             <button className="btn btn--primary btn--block" onClick={() => onEnter(handover)}>
               Enter {handover.committee.name}
             </button>

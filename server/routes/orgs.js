@@ -58,28 +58,47 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
   res.status(201).json({ user: serializeUser(userFromToken(token)), committee_id: result.committeeId });
 });
 
-/** Look a committee up by its shared code, before committing to join it. */
-orgRoutes.get('/committees/lookup', requireUser, (req, res) => {
-  const code = String(req.query.code || '').trim().toUpperCase();
-  const cttee = one(
-    'SELECT id, name, description, total_members FROM committees WHERE committee_code = ?',
-    code
+/**
+ * Every committee on this instance, so a delegate can find the one they have
+ * been assigned to instead of chasing a code for it. A Redline instance hosts
+ * one conference and has no moderator, so there is nothing here to hide from
+ * the people taking part.
+ */
+orgRoutes.get('/committees', requireUser, (req, res) => {
+  const committees = all(
+    `SELECT c.id, c.name, c.description, c.total_members, c.created_at,
+            (SELECT COUNT(*) FROM teams t WHERE t.committee_id = c.id) AS registered_teams,
+            (SELECT m.team_id FROM memberships m
+               JOIN teams t2 ON t2.id = m.team_id
+              WHERE m.user_id = ? AND t2.committee_id = c.id LIMIT 1) AS my_team_id
+       FROM committees c
+      ORDER BY c.name COLLATE NOCASE ASC`,
+    req.user.id
   );
-  if (!cttee) throw missing('No committee with that code.');
-  const teams = all(
-    'SELECT id, country_name FROM teams WHERE committee_id = ? ORDER BY country_name',
-    cttee.id
+  const taken = all(
+    'SELECT committee_id, country_name FROM teams ORDER BY country_name COLLATE NOCASE ASC'
   );
-  res.json({ committee: cttee, teams });
+  res.json({
+    committees: committees.map((c) => ({
+      ...c,
+      // What is already spoken for, so the country picker can rule it out.
+      taken_countries: taken.filter((t) => t.committee_id === c.id).map((t) => t.country_name),
+    })),
+  });
 });
 
-/** Register a new delegation inside an existing committee. */
+/**
+ * Register a new delegation inside an existing committee, named either by id
+ * (picked from the directory above) or by its shared code.
+ */
 orgRoutes.post('/teams', requireUser, (req, res) => {
-  const committeeCode = str(req.body, 'committee_code', { max: 40 }).toUpperCase();
   const countryName = str(req.body, 'country_name', { max: 120 });
 
-  const cttee = one('SELECT * FROM committees WHERE committee_code = ?', committeeCode);
-  if (!cttee) throw missing('No committee with that code.');
+  const cttee = req.body?.committee_id !== undefined
+    ? one('SELECT * FROM committees WHERE id = ?', int(req.body, 'committee_id', { max: 1e9 }))
+    : one('SELECT * FROM committees WHERE committee_code = ?',
+        str(req.body, 'committee_code', { max: 40 }).toUpperCase());
+  if (!cttee) throw missing('That committee no longer exists.');
 
   const clash = one(
     'SELECT id FROM teams WHERE committee_id = ? AND lower(country_name) = lower(?)',

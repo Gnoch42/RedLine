@@ -747,8 +747,41 @@ button, input, textarea, select { font: inherit; color: inherit; }
   transition: box-shadow 0.12s ease, background 0.12s ease;
 }
 .seat:hover { background: #fff; box-shadow: var(--shadow); }
-.seat__country { font-family: var(--serif); font-size: 16px; font-weight: 600; }
-.seat__committee { color: var(--ink-3); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.seat__country { font-family: var(--serif); font-size: 16px; font-weight: 600; display: block; }
+.seat__committee { color: var(--ink-3); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.seat__desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seat--committee { align-items: center; border-left-color: var(--ink); }
+
+/* The committee picked out of the directory, before confirming the seat. */
+.chosen {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--paper-edge);
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--redline);
+  border-radius: var(--radius);
+}
+.chosen__name { font-family: var(--serif); font-size: 18px; font-weight: 600; }
+.chosen__desc { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+.chosen__meta { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-top: 6px; }
+
+.linky {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--redline);
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: inherit;
+}
 
 .lobby__switch { margin-top: 16px; font-size: 12px; color: var(--ink-3); }
 .lobby__switch button { border: 0; background: none; padding: 0; color: var(--redline); cursor: pointer; text-decoration: underline; font-size: 12px; }

@@ -69,18 +69,18 @@ under a misspelling. It carries over as the default every time that delegate reg
 delegation, and can still be overridden: one account holds as many seats as you like,
 which is the usual case when the same delegate sits on several committees.
 
-There are two codes, and they do different jobs.
-
 1. One person **creates the committee**: its name, how many countries are seated in it,
-   and the agenda items. They get a **committee code** and a **delegation join code**.
-2. The committee code goes to **every other country**. Each one registers its own
-   delegation with it and gets a join code of its own.
-3. A delegation's join code goes to **its own delegates**. It is both the invitation and
-   the password: signing in is an email plus that code. Codes can be copied or scanned as
-   a QR.
+   and the agenda items.
+2. Everyone else **picks it from the list** of committees, which every signed-in delegate
+   sees. Joining is one click: the country comes from the account, and the ones already
+   spoken for on that committee are shown but cannot be picked, so a clash is visible
+   before anything is submitted. Nothing has to be handed out for this to work.
+3. The **delegation join code** goes to a delegation's own delegates. It is both the
+   invitation and the password: signing in is an email plus that code, and it can be
+   copied or scanned as a QR.
 
-When you register a country on a committee, the ones already taken are shown but cannot be
-picked, so the clash is visible before you submit.
+A committee still has a code of its own, and `POST /api/teams` still accepts it, but the
+interface no longer asks anyone for it — the list is the way in.
 
 Everyone seated on a committee can correct its settings afterwards — its name, its
 description, the seat count behind the 20% threshold, and the agenda itself — and your own
@@ -128,9 +128,12 @@ polling every few seconds (every 30s when the tab is in the background).
 
 Places where the build spec was silent, or where the implementation makes a call:
 
-- **Committee codes are an addition.** The spec described joining a delegation but not
-  how a second country reaches a committee someone else created. Without it a committee
-  could only ever have one delegation.
+- **Committees are listed, not looked up by code.** The spec described joining a
+  delegation but not how a second country reaches a committee someone else created. A code
+  answered that first; a visible directory answers it better, and with the country already
+  on the account there is then nothing left to type. It does mean every signed-in delegate
+  sees every committee on the instance — which is right for a self-hosted tool running one
+  conference, with no moderator and nothing to keep from the people taking part.
 - **An account is identified by email, not by a `country-committee` username.** The spec's
   username assumed one delegate per country per committee and one committee per delegate;
   both are wrong in practice. Email is unique, memorable, and survives a delegate moving
@@ -198,10 +201,10 @@ GET    /api/auth/me                    the delegate, their seats, the active one
 PATCH  /api/auth/me                    { delegate_name, country }
 POST   /api/auth/switch                { team_id }  move to another of your seats
 
+GET    /api/committees                 every committee, with seats taken and your own
 POST   /api/committees                 create a committee and its first delegation
 PATCH  /api/committees/:id             { name, description, total_members }
-GET    /api/committees/lookup?code=    preview a committee before joining it
-POST   /api/teams                      { committee_code, country_name }
+POST   /api/teams                      { committee_id | committee_code, country_name }
 POST   /api/teams/join                 { join_code }
 GET    /api/committees/:id             delegations, delegates, codes
 GET    /api/committees/:id/board       agenda + propositions, in one poll

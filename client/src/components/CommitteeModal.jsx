@@ -211,10 +211,11 @@ function Codes({ user }) {
         link={joinLink(user.team.join_code)}
         what={`Join code for the ${user.team.country_name} delegation — your fellow delegates sign in with it.`}
       />
-      <CodeCard
-        code={user.committee.committee_code}
-        what="Committee code — other countries use it to register their own delegation."
-      />
+      <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+        Other countries need nothing from you: {user.committee.name} appears in the list of
+        committees everyone sees when they sign in, and they register their own delegation from
+        there.
+      </p>
     </>
   );
 }

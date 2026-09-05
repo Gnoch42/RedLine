@@ -62,12 +62,40 @@ test('a delegate registers, founds a committee and gets both codes', async () =>
   s.projectId = projects[0].id;
 });
 
+test('committees are found in a directory, not by chasing a code', async () => {
+  const token = await register('directory@example.org', 'Priya', 'Australia');
+  const { committees } = await api('/api/committees', { token });
+  const undp = committees.find((c) => c.id === s.committeeId);
+
+  assert.equal(undp.name, 'UNDP');
+  assert.equal(undp.registered_teams, 1);
+  assert.deepEqual(undp.taken_countries, ['France']);
+  assert.equal(undp.my_team_id, null);
+
+  // Joining takes an id off that list; the country comes from the account.
+  const { user } = await api('/api/teams', {
+    method: 'POST', token, body: { committee_id: undp.id, country_name: 'Australia' },
+  });
+  assert.equal(user.team.country_name, 'Australia');
+  assert.equal(user.committee.id, s.committeeId);
+
+  // Coming back, the directory knows where this delegate already sits.
+  const { committees: after } = await api('/api/committees', { token });
+  assert.equal(after.find((c) => c.id === s.committeeId).my_team_id, user.team.id);
+  assert.equal(after.find((c) => c.id === s.committeeId).registered_teams, 2);
+
+  await api('/api/teams', {
+    method: 'POST', token, body: { committee_id: 99999, country_name: 'Fiji' }, expect: 404,
+  });
+});
+
 test('other countries register their own delegations in that committee', async () => {
   s.germany = await delegation('jonas@example.org', 'Jonas', 'Germany');
   s.brazil = await delegation('ana@example.org', 'Ana', 'Brazil');
   s.kenya = await delegation('wanjiru@example.org', 'Wanjiru', 'Kenya');
   s.india = await delegation('ravi@example.org', 'Ravi', 'India');
 
+  // The committee code still works for anyone who prefers to hand one out.
   const dup = await api('/api/teams', {
     method: 'POST',
     token: await register('lea@example.org', 'Léa', 'France'),
