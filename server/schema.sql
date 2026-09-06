@@ -44,8 +44,19 @@ CREATE TABLE IF NOT EXISTS users (
   -- mistyped name; a delegate on several committees can still override it.
   -- Empty for the secretariat, who speak for no one.
   country       TEXT    NOT NULL DEFAULT '',
-  -- The secretariat has no delegation, so no join code to sign in with. They
-  -- get one of their own instead.
+  -- scrypt, salted, parameters stored alongside. Null on an account made before
+  -- passwords existed, or one that has not set one yet.
+  password_hash TEXT,
+  -- A one-time code an administrator issues to someone locked out, and when it
+  -- stops being usable.
+  reset_code    TEXT,
+  reset_expires TEXT,
+  -- Orthogonal to role: an administrator may also be a delegate or on the
+  -- secretariat. It grants the keys to the instance, not standing in a
+  -- committee.
+  is_admin      INTEGER NOT NULL DEFAULT 0,
+  -- Superseded by password_hash. Kept so an account created before passwords
+  -- can present it once to set one.
   personal_code TEXT    UNIQUE,
   created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

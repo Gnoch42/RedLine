@@ -30,7 +30,10 @@ export async function startServer() {
     child.kill();
     rmSync(dataDir, { recursive: true, force: true });
   };
-  return { base, stop, stderr: () => stderr };
+  // The server runs in its own process with its own file; a test that needs to
+  // act as an operator would (appointing the first administrator) opens it the
+  // same way the CLI does.
+  return { base, stop, dbPath: join(dataDir, 'redline.db'), stderr: () => stderr };
 }
 
 /** Thin fetch wrapper that throws on non-2xx, carrying the server's message. */

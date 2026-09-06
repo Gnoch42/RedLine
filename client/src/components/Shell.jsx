@@ -8,6 +8,7 @@ import { AmendmentExplorer } from './AmendmentExplorer.jsx';
 import { Workspace } from './Workspace.jsx';
 import { PropositionEditor, AmendmentEditor, ProjectForm } from './editors.jsx';
 import { CountryProvider } from './CountryCard.jsx';
+import { AdminModal } from './AdminModal.jsx';
 import { SignatureModal } from './SignatureModal.jsx';
 
 /**
@@ -264,6 +265,11 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
           </div>
           <div className="delegate">{user.delegate_name}</div>
         </div>
+        {user.is_admin && (
+          <button className="btn btn--small" onClick={() => setModal({ type: 'admin' })}>
+            Admin
+          </button>
+        )}
         <button className="btn btn--small" onClick={() => setModal({ type: 'committee' })}>Committee</button>
         <button className="btn btn--small" onClick={onSignOut}>Sign out</button>
       </header>
@@ -317,6 +323,10 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
             setModal(null);
           }}
         />
+      )}
+
+      {modal?.type === 'admin' && (
+        <AdminModal user={user} onClose={() => setModal(null)} />
       )}
 
       {modal?.type === 'committee' && (

@@ -45,28 +45,59 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
   const staff = role === 'secretariat';
 
   const form = useSubmit(async (data) => {
-    const path = mode === 'register' ? '/auth/register' : '/auth/login';
+    if (mode === 'recover') {
+      const result = await api('/auth/set-password', {
+        method: 'POST',
+        body: {
+          email: data.get('email'),
+          code: data.get('code'),
+          password: data.get('password'),
+        },
+      });
+      setToken(result.token);
+      onAuthenticated(result.user);
+      return;
+    }
+
     const body = mode === 'register'
       ? {
           delegate_name: data.get('delegate_name'),
           email: data.get('email'),
           phone: data.get('phone'),
+          password: data.get('password'),
           role,
           ...(staff ? {} : { country }),
         }
-      : { email: data.get('email'), join_code: data.get('join_code') };
-    const result = await api(path, { method: 'POST', body });
-    setToken(result.token);
-    onAuthenticated(result.user);
+      : { email: data.get('email'), password: data.get('password') };
+
+    try {
+      const result = await api(mode === 'register' ? '/auth/register' : '/auth/login', {
+        method: 'POST', body,
+      });
+      setToken(result.token);
+      onAuthenticated(result.user);
+    } catch (err) {
+      // An account made before passwords existed has one thing left to do.
+      if (err.status === 409 && mode === 'login') setMode('recover');
+      throw err;
+    }
   });
+
+  const heading = {
+    register: 'Create your delegate account',
+    login: 'Sign in',
+    recover: 'Set a password',
+  }[mode];
 
   return (
     <form onSubmit={form.onSubmit}>
-      <h2>{mode === 'register' ? 'Create your delegate account' : 'Sign in'}</h2>
+      <h2>{heading}</h2>
       <p className="lead">
         {mode === 'register'
           ? 'One account per person — you can sit on as many committees as you like with it.'
-          : 'Your email, plus the join code of any delegation you belong to.'}
+          : mode === 'login'
+            ? 'Your email and your own password.'
+            : 'Enter the code an organiser gave you, and choose a password. If you have never set one, your delegation’s join code works here too.'}
       </p>
 
       {mode === 'register' && (
@@ -114,6 +145,32 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
         {mode === 'register' && <span className="hint">How we recognise you next time.</span>}
       </label>
 
+      {mode === 'recover' && (
+        <label className="field">
+          <span className="label">Code</span>
+          <input name="code" required placeholder="AB4K-7QRT"
+                 style={{ fontFamily: 'var(--mono)', letterSpacing: '0.06em' }} />
+          <span className="hint">Good for one use.</span>
+        </label>
+      )}
+
+      <label className="field">
+        <span className="label">{mode === 'login' ? 'Password' : 'Choose a password'}</span>
+        <input
+          name="password"
+          type="password"
+          required
+          minLength={mode === 'login' ? undefined : 10}
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+        />
+        {mode !== 'login' && (
+          <span className="hint">
+            At least 10 characters. Length is what matters — a short phrase you will remember
+            beats a mangled word you will not.
+          </span>
+        )}
+      </label>
+
       {mode === 'register' && (
         <label className="field">
           <span className="label">Phone or WhatsApp</span>
@@ -125,20 +182,6 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
         </label>
       )}
 
-      {mode === 'login' && (
-        <label className="field">
-          <span className="label">Delegation join code</span>
-          <input
-            name="join_code"
-            required
-            placeholder="AB4K-7QRT"
-            defaultValue={prefillJoinCode || ''}
-            style={{ fontFamily: 'var(--mono)', letterSpacing: '0.06em' }}
-          />
-          <span className="hint">A delegation shares one code — it is both invitation and password.</span>
-        </label>
-      )}
-
       {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
 
       <button
@@ -146,15 +189,38 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
         className="btn btn--primary btn--block"
         disabled={form.busy || (mode === 'register' && !staff && !country.trim())}
       >
-        {form.busy ? 'Working…' : mode === 'register' ? 'Create account' : 'Sign in'}
+        {form.busy
+          ? 'Working…'
+          : mode === 'register' ? 'Create account' : mode === 'login' ? 'Sign in' : 'Set password'}
       </button>
 
       <div className="lobby__switch">
+        {mode === 'login' && (
+          <>
+            <button type="button" onClick={() => setMode('recover')}>
+              Forgotten it, or never set one?
+            </button>
+            {' · '}
+          </>
+        )}
+        {mode === 'recover' && (
+          <>
+            <button type="button" onClick={() => setMode('login')}>Back to signing in</button>
+            {' · '}
+          </>
+        )}
         {mode === 'register' ? 'Already have an account? ' : 'First time here? '}
         <button type="button" onClick={() => setMode(mode === 'register' ? 'login' : 'register')}>
           {mode === 'register' ? 'Sign in' : 'Create an account'}
         </button>
       </div>
+
+      {mode === 'recover' && (
+        <p className="lead" style={{ marginTop: 14, fontSize: 12 }}>
+          Locked out with no code? An organiser can issue you one — they are the only people who
+          can, and they will hand it over in person.
+        </p>
+      )}
     </form>
   );
 }
@@ -510,12 +576,6 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
               Signed in as <strong>{me.delegate_name}</strong>, event secretariat. You can look
               into any room; the drafting itself stays with the delegations.
             </p>
-            {me.personal_code && (
-              <CodeCard
-                code={me.personal_code}
-                what="Your sign-in code. You have no delegation to share one with, so this one is yours — keep it."
-              />
-            )}
             <JoinCommittee me={me} onUser={acceptUser} onSwitched={switchSeat}
                            onOpenCommittee={openCommittee} />
           </>
@@ -559,11 +619,14 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
         {handover && (
           <>
             <h2>One code to hand out</h2>
-            <p className="lead">Write it down now — it is how your fellow delegates get in.</p>
+            <p className="lead">
+              Write it down now — it is how your fellow delegates join you on this desk. They sign
+              in with their own password; this only puts them beside you.
+            </p>
             <CodeCard
               code={handover.team.join_code}
               link={joinLink(handover.team.join_code)}
-              what={`Your delegation (${handover.team.country_name}). Give it to your fellow delegates — it is also what they sign in with.`}
+              what={`Your delegation (${handover.team.country_name}). Give it to your fellow delegates so they can join this desk.`}
             />
             <p className="lead">
               The other countries need nothing from you: {handover.committee.name} is now in the

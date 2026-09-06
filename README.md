@@ -51,8 +51,8 @@ not start one, so leave `npm start` going in another terminal first:
 npm run seed
 ```
 
-It prints an email and join code for each delegation to sign in with. If the server is
-somewhere other than `http://localhost:3000`, tell it where:
+It prints an email for each delegation, all sharing one password it tells you. If the server
+is somewhere other than `http://localhost:3000`, tell it where:
 
 ```bash
 REDLINE_URL=http://localhost:8080 npm run seed
@@ -71,14 +71,19 @@ what they are at the conference.
   same country wherever they sit, so every delegation they register is under it; changing it
   is done once, on the account. One account holds as many seats as you like, which is the
   usual case when the same delegate sits on several committees.
-- **Faculty** — an accompanying teacher or advisor. They sit with their delegation, using
-  its join code, and see everything it sees, private drafts included. Like the secretariat,
+- **Faculty** — an accompanying teacher or advisor. They join their delegation with its
+  invitation code and see everything it sees, private drafts included. Like the secretariat,
   they read the drafting floor without writing to it.
 - **Secretariat** — the people running the event. They pick no country, hold no delegation,
   and can open any committee to read it. They propose nothing, sponsor nothing and approve
   nothing, and they never occupy one of the committee's seats, so they cannot move the 20%
-  threshold. Having no delegation whose code they could share, they get a personal sign-in
-  code of their own.
+  threshold.
+
+Everyone signs in with **their own password**, hashed with scrypt from `node:crypto` — no new
+dependency, nothing to compile. Separately from all three roles, an account can be an
+**administrator** of the installation: the person who can hand back a way in when someone is
+locked out. That is orthogonal on purpose — an administrator is usually also a delegate or on
+the secretariat, and it is the keys to the instance rather than standing in a committee.
 
 1. One person **creates the committee**: its name, how many countries are seated in it,
    and the agenda items.
@@ -89,9 +94,9 @@ what they are at the conference.
    A country is not seated on every committee, so the same list also offers to **look in
    without taking a seat** — you read the room, you do not act in it, and the committee's
    seat count is untouched.
-3. The **delegation join code** goes to a delegation's own delegates and its faculty. It
-   is both the invitation and the password: signing in is an email plus that code, and it
-   can be copied or scanned as a QR.
+3. The **delegation join code** goes to a delegation's own delegates and its faculty. It is
+   an invitation, not a credential: it puts someone on the same desk as you, and will not
+   sign anyone in. It can be copied or scanned as a QR.
 
 A committee still has a code of its own, and `POST /api/teams` still accepts it, but the
 interface no longer asks anyone for it — the list is the way in.
@@ -169,6 +174,32 @@ draft ──submit──> open ──every sponsor calls it settled──> signi
   over the seat count fixed when the committee was created. Crossing it turns **signing**
   into **ready**; signatories keep being added afterwards.
 
+## Passwords, and getting back in
+
+A password is set when the account is created: at least 10 characters, with no composition
+rules — length is what protects it, and forcing a symbol into a short word does not. It is
+stored as a salted scrypt hash and never leaves the server.
+
+There is **no mail server in this design**, which is what keeps deployment to one command. So
+a delegate who forgets their password does not get an email; an **administrator issues them a
+one-time reset code**, from the Admin panel or the command line, and hands it over in person.
+It is good for one use and one hour. At a conference the organisers are in the room anyway,
+which is what makes this trade worth making.
+
+The first administrator is appointed from the machine running the server, since whoever has
+shell access already has the database:
+
+```bash
+npm run admin -- grant you@example.org   # also: list, revoke, reset
+```
+
+After that an administrator can appoint others from the Admin panel. The last one cannot
+stand down — somebody has to be holding the keys.
+
+Repeated wrong guesses on an account are slowed to a stop for a minute at a time. Accounts
+created before passwords existed set one by presenting the code they used to sign in with;
+once an account has a password, only a reset code will replace it.
+
 ## Finding people
 
 Any country name in the interface — on a card, in a sponsor list, beside an amendment —
@@ -212,11 +243,18 @@ Places where the build spec was silent, or where the implementation makes a call
   username assumed one delegate per country per committee and one committee per delegate;
   both are wrong in practice. Email is unique, memorable, and survives a delegate moving
   between delegations.
-- **A valid join code seats you in that delegation.** Login is per delegation, so
-  presenting a delegation's code is what proves you belong to it. A delegate keeps every
-  seat they have been given and moves between them from the masthead. There are still no
-  per-delegate passwords (spec §6, deliberately deferred) — which does mean anyone holding
-  a delegation's code and a delegate's email can sign in as them.
+- **Per-delegate passwords, against the spec's §6.** The spec deferred them and made a
+  delegation's shared join code the credential. That code gets written on a whiteboard,
+  photographed and forwarded — which meant anyone holding it and a delegate's email could
+  sign in as them. The join code now only does the job it is good at: inviting someone onto
+  your desk.
+- **Resets go through a person, not an inbox.** Adding email would mean SMTP credentials,
+  deliverability and spam folders, and would end the one-command deployment; waiting on a
+  message mid-session, on venue wifi, is also the worst moment to depend on one. The
+  organisers are in the room, so they issue the code.
+- **Administration is a flag, not a role.** An administrator is usually also a delegate or
+  on the secretariat, and the two answer different questions: what you are at the
+  conference, and whether you hold the keys to the installation.
 - **Propositions and amendments have a title and no description.** A title that says what
   the text does carries the explorer card on its own; a second summary field was one more
   thing to write and to keep true.
@@ -287,24 +325,31 @@ only, no per-delegate passwords.
 server/           Express API. routes/ is thin; model.js holds the rules above.
   schema.sql      The whole database, applied at boot.
   db.js           Opens it, and migrates one written by an earlier build.
+  passwords.js    scrypt hashing, and what counts as a usable password.
 client/src/       React app. components/ is the three-panel UI, lib/ the diff,
                   Markdown rendering, polling helpers and the country list.
 test/             HTTP-level tests of the business rules.
 scripts/seed.js   The worked example.
+scripts/admin.js  Administrators, from the machine that runs the server.
 ```
 
 ### API
 
 ```
-POST   /api/auth/register              { delegate_name, email, phone, role, country }
-POST   /api/auth/login                 { email, join_code }   -> seats you in that delegation
-                                       (the secretariat presents its own personal code)
+POST   /api/auth/register              { delegate_name, email, phone, role, country, password }
+POST   /api/auth/login                 { email, password } — seats you if you hold one seat
+POST   /api/auth/set-password          { email, code, password }  reset code, or a first one
+POST   /api/auth/password              { current_password, password }
 POST   /api/auth/logout
 GET    /api/auth/me                    the person, their seats, the active one
 PATCH  /api/auth/me                    { delegate_name, phone, country }
 POST   /api/auth/switch                { committee_id } — seats you if you have a seat
                                        there, otherwise you look in without one
 PATCH  /api/auth/seats/:teamId         { is_primary }  mark a working committee
+
+GET    /api/auth/admin/users?q=            administrators only
+POST   /api/auth/admin/users/:id/reset     issue a one-time reset code
+POST   /api/auth/admin/users/:id/admin     { is_admin }  appoint or stand down
 
 GET    /api/committees                 every committee, with seats taken and your own
 GET    /api/countries/:name            who speaks for a country, on every committee

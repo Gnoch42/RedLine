@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { startServer, client } from './helpers.js';
 
 let server;
@@ -15,10 +16,12 @@ before(async () => {
 
 after(() => server.stop());
 
+const PASSWORD = 'a settled draft';
+
 async function register(email, name, country = 'France', extra = {}) {
   const { token } = await api('/api/auth/register', {
     method: 'POST',
-    body: { email, delegate_name: name, country, ...extra },
+    body: { email, delegate_name: name, country, password: PASSWORD, ...extra },
   });
   return token;
 }
@@ -130,21 +133,126 @@ test('a second delegate joins an existing delegation with its join code', async 
   s.franceSecondDelegate = token;
 });
 
-test('login is an email plus the delegation\'s shared join code', async () => {
+test('signing in is an email and a password of your own', async () => {
   const { user } = await api('/api/auth/login', {
-    method: 'POST', body: { email: 'jonas@example.org', join_code: s.germany.joinCode },
+    method: 'POST', body: { email: 'jonas@example.org', password: PASSWORD },
   });
   assert.equal(user.team.country_name, 'Germany');
+  assert.equal(user.has_password, true);
+
   await api('/api/auth/login', {
-    method: 'POST', body: { email: 'jonas@example.org', join_code: 'WRON-GXXX' }, expect: 400,
+    method: 'POST', body: { email: 'jonas@example.org', password: 'not it at all' }, expect: 401,
   });
   await api('/api/auth/login', {
-    method: 'POST', body: { email: 'nobody@example.org', join_code: s.germany.joinCode }, expect: 404,
+    method: 'POST', body: { email: 'nobody@example.org', password: PASSWORD }, expect: 404,
   });
   await api('/api/auth/register', {
     method: 'POST',
-    body: { email: 'jonas@example.org', delegate_name: 'Jonas again', country: 'Germany' },
+    body: { email: 'jonas@example.org', delegate_name: 'Jonas again', country: 'Germany', password: PASSWORD },
     expect: 409,
+  });
+
+  // A delegation's code is an invitation to sit with it, never a way in.
+  const notACredential = await api('/api/auth/login', {
+    method: 'POST', body: { email: 'jonas@example.org', password: s.germany.joinCode }, expect: 401,
+  });
+  assert.match(notACredential.error, /does not match/);
+});
+
+test('a password has to be long enough to be worth having', async () => {
+  for (const [password, why] of [
+    ['short', /at least 10/],
+    ['weakling@example.org', /not contain your email/],
+  ]) {
+    const refused = await api('/api/auth/register', {
+      method: 'POST',
+      body: { email: 'weakling@example.org', delegate_name: 'Pat', country: 'Chile', password },
+      expect: 400,
+    });
+    assert.match(refused.error, why);
+  }
+  await api('/api/auth/register', {
+    method: 'POST', body: { email: 'weakling@example.org', delegate_name: 'Pat', country: 'Chile' },
+    expect: 400,
+  });
+});
+
+test('an administrator can hand back a way in, and nobody else can', async () => {
+  const lockedOut = 'forgetful@example.org';
+  await register(lockedOut, 'Ida', 'Iceland');
+  const { user: ida } = await api('/api/auth/login', {
+    method: 'POST', body: { email: lockedOut, password: PASSWORD },
+  });
+  assert.equal(ida.is_admin, false);
+
+  // Not for delegates, not for the secretariat: administration is its own key.
+  await api('/api/auth/admin/users', { token: s.france.token, expect: 403 });
+
+  // The first administrator is appointed from the machine that runs the server,
+  // exactly as `npm run admin -- grant` does.
+  const disk = new DatabaseSync(server.dbPath);
+  disk.prepare('UPDATE users SET is_admin = 1 WHERE email = ?').run('camille@example.org');
+  disk.close();
+
+  const { users } = await api('/api/auth/admin/users?q=forgetful', { token: s.france.token });
+  assert.equal(users.length, 1);
+  assert.equal(users[0].email, lockedOut);
+  assert.equal(users[0].has_password, true);
+
+  const { reset_code: code } = await api(`/api/auth/admin/users/${users[0].id}/reset`, {
+    method: 'POST', token: s.france.token,
+  });
+  assert.match(code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+
+  // The code sets a new password, and only that code will do.
+  await api('/api/auth/set-password', {
+    method: 'POST', body: { email: lockedOut, code: 'WRON-GXXX', password: 'a whole new phrase' },
+    expect: 403,
+  });
+  const { user: back } = await api('/api/auth/set-password', {
+    method: 'POST', body: { email: lockedOut, code, password: 'a whole new phrase' },
+  });
+  assert.equal(back.email, lockedOut);
+  await api('/api/auth/login', {
+    method: 'POST', body: { email: lockedOut, password: 'a whole new phrase' },
+  });
+
+  // One use only.
+  await api('/api/auth/set-password', {
+    method: 'POST', body: { email: lockedOut, code, password: 'yet another phrase' }, expect: 403,
+  });
+
+  // The last administrator cannot stand down and leave nobody holding the keys.
+  const me = (await api('/api/auth/admin/users?q=camille', { token: s.france.token })).users[0];
+  const stuck = await api(`/api/auth/admin/users/${me.id}/admin`, {
+    method: 'POST', token: s.france.token, body: { is_admin: false }, expect: 409,
+  });
+  assert.match(stuck.error, /last administrator/);
+});
+
+test('an account made before passwords sets one with its old code', async () => {
+  // Simulate one: an account with no password, as every account was before.
+  const disk = new DatabaseSync(server.dbPath);
+  disk.prepare(`INSERT INTO users (email, delegate_name, country, role) VALUES (?, ?, ?, 'delegate')`)
+    .run('legacy@example.org', 'Old Hand', 'Peru');
+  disk.close();
+
+  await api('/api/auth/login', {
+    method: 'POST', body: { email: 'legacy@example.org', password: PASSWORD }, expect: 409,
+  });
+
+  const { user } = await api('/api/auth/set-password', {
+    method: 'POST',
+    body: { email: 'legacy@example.org', code: s.japan.joinCode, password: 'the old ways' },
+  });
+  // The code was an invitation, so it also seated them.
+  assert.equal(user.team.country_name, 'Japan');
+
+  // And now that they have one, that invitation is no longer a way in.
+  await api('/api/auth/set-password', {
+    method: 'POST',
+    body: { email: 'legacy@example.org', code: s.japan.joinCode, password: 'trying again' },
+    expect: 403,
   });
 });
 
@@ -510,7 +618,7 @@ test('the secretariat observes every committee and writes to none', async () => 
     method: 'POST',
     body: {
       email: 'sg@example.org', delegate_name: 'Marc Aubry',
-      phone: '+1 514 555 0101', role: 'secretariat',
+      phone: '+1 514 555 0101', role: 'secretariat', password: PASSWORD,
     },
   });
   assert.equal(user.role, 'secretariat');
@@ -559,16 +667,16 @@ test('the secretariat observes every committee and writes to none', async () => 
   s.secretariatToken = token;
 });
 
-test('the secretariat signs back in with a code of its own', async () => {
+test('the secretariat signs in like anyone else, holding no delegation', async () => {
   const { user } = await api('/api/auth/me', { token: s.secretariatToken });
-  // The code is theirs, not a delegation's, and it is never in the seat list.
+  assert.equal(user.seats.length, 0);
   const { committee } = await api(`/api/committees/${s.committeeId}`, { token: s.secretariatToken });
   assert.equal(committee.id, s.committeeId);
 
-  const bad = await api('/api/auth/login', {
-    method: 'POST', body: { email: user.email, join_code: s.france.joinCode }, expect: 400,
+  const { user: back } = await api('/api/auth/login', {
+    method: 'POST', body: { email: user.email, password: PASSWORD },
   });
-  assert.match(bad.error, /own code/);
+  assert.equal(back.role, 'secretariat');
 });
 
 test('a country card gathers its delegates across every committee', async () => {
@@ -588,10 +696,13 @@ test('a country card gathers its delegates across every committee', async () => 
 });
 
 test('faculty sit with their delegation, and read without writing', async () => {
-  await register('prof@example.org', 'Mme Roy', 'France', { role: 'faculty' });
+  s.facultyToken = await register('prof@example.org', 'Mme Roy', 'France', { role: 'faculty' });
   // The delegation's join code seats them beside its delegates.
+  await api('/api/teams/join', {
+    method: 'POST', token: s.facultyToken, body: { join_code: s.france.joinCode },
+  });
   const { token, user } = await api('/api/auth/login', {
-    method: 'POST', body: { email: 'prof@example.org', join_code: s.france.joinCode },
+    method: 'POST', body: { email: 'prof@example.org', password: PASSWORD },
   });
   assert.equal(user.role, 'faculty');
   assert.equal(user.team.country_name, 'France');

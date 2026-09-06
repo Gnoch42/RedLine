@@ -48,11 +48,16 @@ async function preflight() {
   console.log(`Seeding ${BASE} (database: ${health.db})`);
 }
 
+// One password for the whole worked example; it is a demo, not a deployment.
+const PASSWORD = 'a settled draft';
 let phoneCounter = 100;
 const register = async (email, name, country, extra = {}) =>
   (await call('/auth/register', {
     method: 'POST',
-    body: { email, delegate_name: name, country, phone: `+1 514 555 0${phoneCounter++}`, ...extra },
+    body: {
+      email, delegate_name: name, country, password: PASSWORD,
+      phone: `+1 514 555 0${phoneCounter++}`, ...extra,
+    },
   })).token;
 
 const TEXT = `The Committee,
@@ -211,18 +216,19 @@ const main = async () => {
     });
   }
 
-  const line = (email, code, note) => `  ${email.padEnd(30)} ${code}   ${note}`;
-  console.log(`\n${fr.committee.name} is ready. Sign in with an email and that delegation's code:\n`);
-  console.log(line(fr.email, fr.team.join_code, 'France — sponsor, one approval pending'));
-  console.log(line(`theo.${stamp}@example.org`, fr.team.join_code, 'France — second delegate, same drafts'));
+  const line = (email, note) => `  ${email.padEnd(30)} ${note}`;
+  console.log(`\n${fr.committee.name} is ready.`);
+  console.log(`Every account below signs in with the password: ${PASSWORD}\n`);
+  console.log(line(fr.email, 'France — sponsor, one approval pending'));
+  console.log(line(`theo.${stamp}@example.org`, 'France — second delegate, same drafts'));
   for (const [country, { user }] of Object.entries(delegations)) {
     if (country === 'France') continue;
-    console.log(line(user.email, user.team.join_code, country));
+    console.log(line(user.email, country));
   }
-  console.log(line(`roy.${stamp}@example.org`, fr.team.join_code, 'France — faculty advisor'));
-  console.log(`\n  ${staff.email.padEnd(30)} ${staff.personal_code}   Secretariat — reads every committee`);
-  console.log('\nMore countries need no code: they pick the committee from the list after');
-  console.log('creating an account.');
+  console.log(line(`roy.${stamp}@example.org`, 'France — faculty advisor'));
+  console.log(line(staff.email, 'Secretariat — reads every committee'));
+  console.log('\nTo try the administration panel, appoint one from this machine:');
+  console.log(`  npm run admin -- grant ${fr.email}`);
   console.log(`\nOpen ${BASE}\n`);
 };
 

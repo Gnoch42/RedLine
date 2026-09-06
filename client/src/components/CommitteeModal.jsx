@@ -243,19 +243,11 @@ function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
 function Codes({ user }) {
   if (!user.team) {
     return (
-      <>
-        {user.personal_code && (
-          <CodeCard
-            code={user.personal_code}
-            what="Your sign-in code. It belongs to you, not to a delegation — keep it."
-          />
-        )}
-        <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-          {user.role === 'secretariat'
-            ? `Delegations hand out their own join codes; yours gets you into every committee.`
-            : `You are looking in on ${user.committee.name} without a delegation, so there is no join code to give out here. Take a seat on it and you will have one to share with your fellow delegates.`}
-        </p>
-      </>
+      <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+        {user.role === 'secretariat'
+          ? 'You hold no delegation, so there is no join code here. Delegations hand out their own to their delegates.'
+          : `You are looking in on ${user.committee.name} without a delegation, so there is no join code to give out here. Take a seat on it and you will have one to share with your fellow delegates.`}
+      </p>
     );
   }
 
@@ -264,7 +256,7 @@ function Codes({ user }) {
       <CodeCard
         code={user.team.join_code}
         link={joinLink(user.team.join_code)}
-        what={`Join code for the ${user.team.country_name} delegation — your fellow delegates sign in with it.`}
+        what={`Invitation to the ${user.team.country_name} delegation. A delegate who has it can join you here — it is not a password, and it will not sign anyone in.`}
       />
       <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
         Other countries need nothing from you: {user.committee.name} appears in the list of
@@ -272,6 +264,66 @@ function Codes({ user }) {
         there.
       </p>
     </>
+  );
+}
+
+function PasswordChange() {
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState({ current_password: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  const set = (key) => (event) => {
+    setValues((v) => ({ ...v, [key]: event.target.value }));
+    setDone(false);
+  };
+
+  if (!open) {
+    return (
+      <div style={{ marginTop: 14 }}>
+        <button className="btn btn--ghost btn--small" onClick={() => setOpen(true)}>
+          Change password
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--rule)' }}>
+      <span className="label">Change password</span>
+      <Error message={error} />
+      <label className="field" style={{ marginTop: 8 }}>
+        <span className="label">Current password</span>
+        <input type="password" autoComplete="current-password"
+               value={values.current_password} onChange={set('current_password')} />
+      </label>
+      <label className="field">
+        <span className="label">New password</span>
+        <input type="password" autoComplete="new-password" minLength={10}
+               value={values.password} onChange={set('password')} />
+        <span className="hint">At least 10 characters.</span>
+      </label>
+      <button
+        className="btn"
+        disabled={busy || values.password.length < 10}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await api('/auth/password', { method: 'POST', body: values });
+            setValues({ current_password: '', password: '' });
+            setDone(true);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? 'Saving…' : done ? 'Changed ✓' : 'Change it'}
+      </button>
+    </div>
   );
 }
 
@@ -379,6 +431,8 @@ function Account({ user, seat, onSaved, onLeave }) {
       >
         {busy ? 'Saving…' : saved && !dirty ? 'Saved ✓' : 'Save'}
       </button>
+
+      <PasswordChange />
 
       {user.team && (
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)' }}>

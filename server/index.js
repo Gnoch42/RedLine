@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { dbPath } from './db.js';
+import { dbPath, one } from './db.js';
 import { HttpError } from './http.js';
 import { authRoutes } from './routes/auth.js';
 import { orgRoutes } from './routes/orgs.js';
@@ -55,4 +55,11 @@ const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(`Redline listening on http://localhost:${port}`);
   console.log(`Database: ${dbPath}`);
+
+  // Password resets need somebody able to issue them, and nothing else can
+  // appoint the first one.
+  if (one('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1').n === 0) {
+    console.log('\nNo administrator yet. Once you have an account, appoint it with:');
+    console.log('  npm run admin -- grant you@example.org\n');
+  }
 });

@@ -76,6 +76,10 @@ function migrate() {
     ['phone', "ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''"],
     ['role', "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'delegate'"],
     ['personal_code', 'ALTER TABLE users ADD COLUMN personal_code TEXT'],
+    ['password_hash', 'ALTER TABLE users ADD COLUMN password_hash TEXT'],
+    ['reset_code', 'ALTER TABLE users ADD COLUMN reset_code TEXT'],
+    ['reset_expires', 'ALTER TABLE users ADD COLUMN reset_expires TEXT'],
+    ['is_admin', 'ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0'],
   ]) {
     if (!columnsOf('users').includes(column)) db.exec(ddl);
   }

@@ -14,7 +14,8 @@
     "build": "npm --prefix client install && npm --prefix client run build",
     "start": "node server/index.js",
     "test": "node --test \"test/*.test.js\"",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "admin": "node scripts/admin.js"
   },
   "dependencies": {
     "express": "^5.1.0"

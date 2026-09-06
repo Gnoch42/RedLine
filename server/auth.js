@@ -93,6 +93,7 @@ export function userFromToken(token) {
   if (!token) return null;
   return one(
     `SELECT u.id, u.email, u.delegate_name, u.phone, u.role, u.country, u.personal_code,
+            u.is_admin, u.password_hash,
             s.active_team_id AS team_id,
             s.active_committee_id AS committee_id,
             t.country_name, t.join_code,
@@ -124,6 +125,17 @@ export function seatsOf(userId) {
 function tokenFrom(req) {
   const header = req.get('authorization') || '';
   return header.startsWith('Bearer ') ? header.slice(7) : null;
+}
+
+/** The keys to the instance: resetting passwords, and appointing more admins. */
+export function requireAdmin(req, res, next) {
+  requireUser(req, res, (err) => {
+    if (err) return next(err);
+    if (!req.user.is_admin) {
+      return next(new HttpError(403, 'That is for an administrator of this Redline instance.'));
+    }
+    next();
+  });
 }
 
 /** Signed in, but possibly not sitting anywhere yet. */
@@ -183,8 +195,10 @@ export function serializeUser(user) {
     phone: user.phone,
     role: user.role,
     country: user.country,
-    // Only ever serialised for the account making the request.
-    personal_code: user.personal_code || null,
+    is_admin: !!user.is_admin,
+    // True once they have a password of their own; false for an account made
+    // before passwords, which still has to set one.
+    has_password: !!user.password_hash,
     seats: seatsOf(user.id),
     team: user.team_id
       ? {
