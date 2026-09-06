@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { one, all, run, tx } from '../db.js';
 import { conflict, str } from '../http.js';
-import { requireTeam } from '../auth.js';
+import { requireCommittee, requireDelegation } from '../auth.js';
 import {
   getProposition, getAmendment, assertPropositionVisible, assertAmendmentVisible,
   serializeAmendment, serializeProposition, amendmentApprovalState, adoptAmendment,
@@ -27,7 +27,7 @@ function setCosponsors(amendmentId, teamIds, committeeId) {
 
 /* ------------------------------------------------------- list / create */
 
-amendmentRoutes.get('/propositions/:id/amendments', requireTeam, (req, res) => {
+amendmentRoutes.get('/propositions/:id/amendments', requireCommittee, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   const rows = all(
     `SELECT a.*, t.country_name AS proposing_country
@@ -41,7 +41,7 @@ amendmentRoutes.get('/propositions/:id/amendments', requireTeam, (req, res) => {
   res.json({ amendments: rows.map((a) => serializeAmendment(a, prop, req.user)) });
 });
 
-amendmentRoutes.post('/propositions/:id/amendments', requireTeam, (req, res) => {
+amendmentRoutes.post('/propositions/:id/amendments', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   if (prop.status !== 'active') {
     throw conflict('Amendments can only be written against a live proposition.');
@@ -67,7 +67,7 @@ amendmentRoutes.post('/propositions/:id/amendments', requireTeam, (req, res) => 
   });
 });
 
-amendmentRoutes.get('/amendments/:id', requireTeam, (req, res) => {
+amendmentRoutes.get('/amendments/:id', requireCommittee, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   const base = one('SELECT * FROM versions WHERE id = ?', amendment.base_version_id);
@@ -83,7 +83,7 @@ amendmentRoutes.get('/amendments/:id', requireTeam, (req, res) => {
 
 /* ------------------------------------------------------- transitions */
 
-amendmentRoutes.patch('/amendments/:id', requireTeam, (req, res) => {
+amendmentRoutes.patch('/amendments/:id', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   assertOwnTeam(amendment, req.user, "an amendment's");
@@ -111,7 +111,7 @@ amendmentRoutes.patch('/amendments/:id', requireTeam, (req, res) => {
  * the amendment lands frozen instead: same state, same fix (reapply) as a
  * conflict discovered later (§5.3).
  */
-amendmentRoutes.patch('/amendments/:id/submit', requireTeam, (req, res) => {
+amendmentRoutes.patch('/amendments/:id/submit', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   assertOwnTeam(amendment, req.user, "an amendment's");
@@ -132,7 +132,7 @@ amendmentRoutes.patch('/amendments/:id/submit', requireTeam, (req, res) => {
  * §5.2.4–5 — record one sponsor's approval, and adopt the moment every current
  * sponsor of the target proposition has approved.
  */
-amendmentRoutes.post('/amendments/:id/approve', requireTeam, (req, res) => {
+amendmentRoutes.post('/amendments/:id/approve', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
 
@@ -172,7 +172,7 @@ amendmentRoutes.post('/amendments/:id/approve', requireTeam, (req, res) => {
  * §5.2.6 — give up on approval and take the text out as a rival proposition of
  * its own, seeded at version 1.
  */
-amendmentRoutes.post('/amendments/:id/detach', requireTeam, (req, res) => {
+amendmentRoutes.post('/amendments/:id/detach', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   assertOwnTeam(amendment, req.user, "an amendment's");
@@ -219,7 +219,7 @@ amendmentRoutes.post('/amendments/:id/detach', requireTeam, (req, res) => {
  * §5.3 — manual rebase of a frozen amendment onto the current version. Prior
  * approvals are cleared: sponsors approved a different text.
  */
-amendmentRoutes.post('/amendments/:id/reapply', requireTeam, (req, res) => {
+amendmentRoutes.post('/amendments/:id/reapply', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   assertOwnTeam(amendment, req.user, "an amendment's");
@@ -251,7 +251,7 @@ amendmentRoutes.post('/amendments/:id/reapply', requireTeam, (req, res) => {
   });
 });
 
-amendmentRoutes.post('/amendments/:id/withdraw', requireTeam, (req, res) => {
+amendmentRoutes.post('/amendments/:id/withdraw', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   assertOwnTeam(amendment, req.user, "an amendment's");

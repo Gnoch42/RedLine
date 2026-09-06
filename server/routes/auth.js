@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { one, run } from '../db.js';
+import { one, run, uniqueCode } from '../db.js';
 import { bad, conflict, missing, str } from '../http.js';
 import {
   createSession, destroySession, requireUser, serializeUser, userFromToken,
-  joinTeam, isMember, setActiveTeam,
+  joinTeam, isMember, sit, ROLES,
 } from '../auth.js';
 
 export const authRoutes = Router();
@@ -18,44 +18,64 @@ function normalizeEmail(body) {
   return email;
 }
 
+function normalizeRole(body) {
+  const role = (body?.role || 'delegate').trim();
+  if (!ROLES.includes(role)) throw bad(`"role" must be one of: ${ROLES.join(', ')}.`);
+  return role;
+}
+
 /**
- * An account is a person: name, email, and the country they represent. The
- * country is picked from a list rather than typed, and carries over as the
- * default whenever they register a delegation — a delegate who sits on several
- * committees can still speak for someone else on one of them.
+ * An account is a person: how to reach them, what they are at the conference,
+ * and — for anyone speaking for a country — which one. The secretariat speaks
+ * for no one, so they pick no country and get a code of their own to sign in
+ * with, having no delegation whose code they could share.
  */
 authRoutes.post('/register', (req, res) => {
   const email = normalizeEmail(req.body);
   const delegateName = str(req.body, 'delegate_name', { max: 120 });
-  const country = str(req.body, 'country', { max: 120 });
+  const phone = str(req.body, 'phone', { required: false, max: 60 });
+  const role = normalizeRole(req.body);
+  const country = role === 'secretariat'
+    ? ''
+    : str(req.body, 'country', { max: 120 });
 
   if (one('SELECT id FROM users WHERE email = ?', email)) {
     throw conflict('There is already an account with that email — sign in with it instead.');
   }
+  const personalCode = role === 'secretariat' ? uniqueCode('users', 'personal_code') : null;
   const info = run(
-    'INSERT INTO users (email, delegate_name, country) VALUES (?, ?, ?)',
-    email, delegateName, country
+    `INSERT INTO users (email, delegate_name, phone, role, country, personal_code)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    email, delegateName, phone, role, country, personalCode
   );
   const token = createSession(Number(info.lastInsertRowid));
   res.status(201).json({ token, user: serializeUser(userFromToken(token)) });
 });
 
 /**
- * §6 — the delegation's join code is the credential. Presenting one also seats
- * the delegate in that delegation, so an invitation and a login are the same
- * gesture. A delegate keeps every seat they have been given.
+ * §6 — the delegation's join code is the credential, and presenting one also
+ * seats the delegate in that delegation: an invitation and a login are the same
+ * gesture. The secretariat presents their own code instead.
  */
 authRoutes.post('/login', (req, res) => {
   const email = normalizeEmail(req.body);
-  const joinCode = str(req.body, 'join_code', { max: 40 }).toUpperCase();
+  const code = str(req.body, 'join_code', { max: 40 }).toUpperCase();
 
   const user = one('SELECT * FROM users WHERE email = ?', email);
   if (!user) throw missing('No account with that email. Create one first.');
 
-  const team = one('SELECT * FROM teams WHERE join_code = ?', joinCode);
-  if (!team) throw bad('That delegation code is not valid.');
+  if (user.personal_code && code === user.personal_code) {
+    const token = createSession(user.id);
+    return res.json({ token, user: serializeUser(userFromToken(token)) });
+  }
 
-  const token = createSession(user.id, team.id);
+  const team = one('SELECT * FROM teams WHERE join_code = ?', code);
+  if (!team) throw bad('That code is not valid.');
+  if (user.role === 'secretariat') {
+    throw bad('Secretariat accounts sign in with their own code, not a delegation’s.');
+  }
+
+  const token = createSession(user.id);
   joinTeam(user.id, team.id, token);
   res.json({ token, user: serializeUser(userFromToken(token)) });
 });
@@ -69,19 +89,34 @@ authRoutes.get('/me', requireUser, (req, res) => {
   res.json({ user: serializeUser(req.user) });
 });
 
-/** Correct your own name or country — the country picked at sign-up sticks. */
+/** Correct your own details. Role and email are fixed once chosen. */
 authRoutes.patch('/me', requireUser, (req, res) => {
   const delegateName = str(req.body, 'delegate_name', { max: 120 });
-  const country = str(req.body, 'country', { max: 120 });
-  run('UPDATE users SET delegate_name = ?, country = ? WHERE id = ?',
-    delegateName, country, req.user.id);
+  const phone = str(req.body, 'phone', { required: false, max: 60 });
+  const country = req.user.role === 'secretariat'
+    ? ''
+    : str(req.body, 'country', { max: 120 });
+  run('UPDATE users SET delegate_name = ?, phone = ?, country = ? WHERE id = ?',
+    delegateName, phone, country, req.user.id);
   res.json({ user: serializeUser(userFromToken(req.token)) });
 });
 
-/** Move to another committee this delegate already has a seat on. */
+/**
+ * Move between committees: a delegate to a seat they hold, the secretariat to
+ * any committee at all — overseeing every room is the job.
+ */
 authRoutes.post('/switch', requireUser, (req, res) => {
+  if (req.body?.committee_id !== undefined && req.user.role === 'secretariat') {
+    const committeeId = Number(req.body.committee_id);
+    if (!one('SELECT id FROM committees WHERE id = ?', committeeId)) {
+      throw missing('No such committee.');
+    }
+    sit(req.token, { committeeId });
+    return res.json({ user: serializeUser(userFromToken(req.token)) });
+  }
+
   const teamId = Number(req.body?.team_id);
   if (!isMember(req.user.id, teamId)) throw missing('You do not have a seat in that delegation.');
-  setActiveTeam(req.token, teamId);
+  sit(req.token, { teamId });
   res.json({ user: serializeUser(userFromToken(req.token)) });
 });

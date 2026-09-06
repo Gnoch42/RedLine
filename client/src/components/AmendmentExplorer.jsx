@@ -1,5 +1,6 @@
 import React from 'react';
-import { Stamp, formatDate } from './bits.jsx';
+import { Card, Stamp, formatDate } from './bits.jsx';
+import { CountryLink } from './CountryCard.jsx';
 
 const ORDER = { pending: 0, frozen: 1, draft: 2, adopted: 3, detached: 4, withdrawn: 5 };
 
@@ -36,12 +37,12 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
             Nothing filed yet.<br />
             {canPropose
               ? 'Propose a change to this text and collect the sponsors’ approval.'
-              : 'Amendments can only be written against a live proposition.'}
+              : 'Amendments are written by delegations, against a live proposition.'}
           </div>
         )}
 
         {list.map((amendment) => (
-          <button
+          <Card
             key={amendment.id}
             className={[
               'card',
@@ -56,7 +57,7 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
               <span className="card__name">{amendment.name}</span>
             </div>
             <div className="card__foot">
-              <span className="card__country">{amendment.proposing_team.country_name}</span>
+              <CountryLink name={amendment.proposing_team.country_name} className="card__country" />
               <span className="spacer" />
               <Stamp status={amendment.status} />
             </div>
@@ -69,7 +70,7 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
               <span className="spacer" />
               <span>{formatDate(amendment.updated_at)}</span>
             </div>
-          </button>
+          </Card>
         ))}
       </div>
     </section>

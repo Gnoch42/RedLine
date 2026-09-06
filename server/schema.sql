@@ -31,10 +31,22 @@ CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   email         TEXT    NOT NULL UNIQUE,
   delegate_name TEXT    NOT NULL,
+  -- Optional second way to reach someone during the conference.
+  phone         TEXT    NOT NULL DEFAULT '',
+  -- delegate | faculty | secretariat
+  --   delegate    a country's representative, full rights
+  --   faculty     an accompanying teacher, seated with their delegation
+  --   secretariat the people running the event: no country, no delegation, and
+  --               read-only on the drafting floor
+  role          TEXT    NOT NULL DEFAULT 'delegate',
   -- The country this delegate represents, chosen from a list at sign-up. It is
   -- the default when they register a delegation, so nobody files one under a
   -- mistyped name; a delegate on several committees can still override it.
+  -- Empty for the secretariat, who speak for no one.
   country       TEXT    NOT NULL DEFAULT '',
+  -- The secretariat has no delegation, so no join code to sign in with. They
+  -- get one of their own instead.
+  personal_code TEXT    UNIQUE,
   created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
@@ -48,12 +60,15 @@ CREATE TABLE IF NOT EXISTS memberships (
   UNIQUE (user_id, team_id)
 );
 
--- active_team_id is which of those seats the session is currently sitting in.
+-- Where the session is currently sitting. A delegate sits in a delegation, and
+-- active_committee_id follows from it; the secretariat sits in a committee with
+-- no delegation at all. The two are always written together.
 CREATE TABLE IF NOT EXISTS sessions (
-  token          TEXT PRIMARY KEY,
-  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  active_team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
-  created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  token               TEXT PRIMARY KEY,
+  user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  active_team_id      INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+  active_committee_id INTEGER REFERENCES committees(id) ON DELETE SET NULL,
+  created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 -- An agenda item within a committee.
@@ -133,5 +148,8 @@ CREATE INDEX IF NOT EXISTS idx_approvals_target  ON approvals (target_type, targ
 CREATE INDEX IF NOT EXISTS idx_propositions_proj ON propositions (project_id);
 CREATE INDEX IF NOT EXISTS idx_projects_cttee    ON projects (committee_id);
 CREATE INDEX IF NOT EXISTS idx_teams_cttee       ON teams (committee_id);
+-- Also constrains databases migrated from a build without the column.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_personal_code
+  ON users (personal_code) WHERE personal_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memberships_user  ON memberships (user_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_team  ON memberships (team_id);

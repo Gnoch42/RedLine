@@ -15,10 +15,10 @@ before(async () => {
 
 after(() => server.stop());
 
-async function register(email, name, country = 'France') {
+async function register(email, name, country = 'France', extra = {}) {
   const { token } = await api('/api/auth/register', {
     method: 'POST',
-    body: { email, delegate_name: name, country },
+    body: { email, delegate_name: name, country, ...extra },
   });
   return token;
 }
@@ -437,6 +437,112 @@ test('unauthenticated and seatless requests are turned away', async () => {
   await api(`/api/propositions/${s.propId}`, { expect: 401 });
   const lonely = await register('kim@example.org', 'Kim', 'Japan');
   await api(`/api/propositions/${s.propId}`, { token: lonely, expect: 403 });
+});
+
+test('a phone number rides along with the account', async () => {
+  const token = await register('reach@example.org', 'Lin', 'Singapore', { phone: '+65 8123 4567' });
+  const { user } = await api('/api/auth/me', { token });
+  assert.equal(user.phone, '+65 8123 4567');
+
+  const { user: updated } = await api('/api/auth/me', {
+    method: 'PATCH', token,
+    body: { delegate_name: 'Lin Wei', phone: '+65 9000 0000', country: 'Singapore' },
+  });
+  assert.equal(updated.phone, '+65 9000 0000');
+});
+
+test('the secretariat observes every committee and writes to none', async () => {
+  const { token, user } = await api('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: 'sg@example.org', delegate_name: 'Marc Aubry',
+      phone: '+1 514 555 0101', role: 'secretariat',
+    },
+  });
+  assert.equal(user.role, 'secretariat');
+  assert.equal(user.country, '');
+  assert.equal(user.seats.length, 0);
+
+  // They can open any committee without holding a seat in it.
+  const { user: seated } = await api('/api/auth/switch', {
+    method: 'POST', token, body: { committee_id: s.committeeId },
+  });
+  assert.equal(seated.committee.id, s.committeeId);
+  assert.equal(seated.team, null);
+
+  // Reading the room is fine.
+  const board = await api(`/api/committees/${s.committeeId}/board`, { token });
+  assert.ok(board.projects.length > 0);
+  const { proposition } = await api(`/api/propositions/${s.propId}`, { token });
+  assert.equal(proposition.my_roles.sponsor, false);
+
+  // Drafts belong to delegations, and the secretariat is in none.
+  const visible = board.projects.flatMap((p) => p.propositions);
+  assert.equal(visible.some((p) => p.status === 'draft'), false);
+
+  // Everything that would put them on the floor is refused.
+  for (const [method, path, body] of [
+    ['POST', `/api/projects/${s.projectId}/propositions`, { name: 'No', content: 'x' }],
+    ['POST', `/api/propositions/${s.propId}/sponsor`, undefined],
+    ['POST', `/api/propositions/${s.propId}/sign`, undefined],
+    ['POST', `/api/propositions/${s.propId}/amendments`, { name: 'No', content: 'x' }],
+    ['POST', `/api/amendments/${s.amendmentId}/approve`, undefined],
+  ]) {
+    const refused = await api(path, { method, token, body, expect: 403 });
+    assert.match(refused.error, /secretariat/i);
+  }
+
+  // And they never take a delegation, so they never occupy a seat.
+  await api('/api/teams', {
+    method: 'POST', token, body: { committee_id: s.committeeId, country_name: 'Chad' }, expect: 403,
+  });
+  const { committees } = await api('/api/committees', { token });
+  const undp = committees.find((c) => c.id === s.committeeId);
+  assert.equal(undp.taken_countries.includes('Chad'), false);
+  assert.equal(undp.my_team_id, null);
+
+  s.secretariatToken = token;
+});
+
+test('the secretariat signs back in with a code of its own', async () => {
+  const { user } = await api('/api/auth/me', { token: s.secretariatToken });
+  // The code is theirs, not a delegation's, and it is never in the seat list.
+  const { committee } = await api(`/api/committees/${s.committeeId}`, { token: s.secretariatToken });
+  assert.equal(committee.id, s.committeeId);
+
+  const bad = await api('/api/auth/login', {
+    method: 'POST', body: { email: user.email, join_code: s.france.joinCode }, expect: 400,
+  });
+  assert.match(bad.error, /own code/);
+});
+
+test('a country card gathers its delegates across every committee', async () => {
+  const { delegations } = await api('/api/countries/France', { token: s.germany.token });
+  const undp = delegations.find((d) => d.committee_id === s.committeeId);
+
+  assert.equal(undp.country_name, 'France');
+  // Camille and Théo both sit on the French desk.
+  assert.ok(undp.delegates.length >= 2);
+  assert.ok(undp.delegates.every((d) => d.email));
+  assert.ok(undp.propositions.some((p) => p.id === s.propId));
+
+  // Case does not matter, and unknown countries say so.
+  const lower = await api('/api/countries/france', { token: s.germany.token });
+  assert.equal(lower.country, 'France');
+  await api('/api/countries/Atlantis', { token: s.germany.token, expect: 404 });
+});
+
+test('faculty sit with their delegation and keep a delegate\'s hands', async () => {
+  await register('prof@example.org', 'Mme Roy', 'France', { role: 'faculty' });
+  // The delegation's join code seats them beside its delegates.
+  const { token, user } = await api('/api/auth/login', {
+    method: 'POST', body: { email: 'prof@example.org', join_code: s.france.joinCode },
+  });
+  assert.equal(user.role, 'faculty');
+  assert.equal(user.team.country_name, 'France');
+
+  const { propositions } = await api(`/api/projects/${s.projectId}/propositions`, { token });
+  assert.ok(propositions.length > 0);
 });
 
 test('the committee and its agenda can be corrected after the fact', async () => {

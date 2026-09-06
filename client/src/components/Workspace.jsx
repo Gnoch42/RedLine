@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Stamp, SupportMeter, ApprovalTally, Blank, formatDate } from './bits.jsx';
+import { CountryLink } from './CountryCard.jsx';
 import { Sheet, MarkdownBody, DiffBody, DiffSummary } from './DocumentSheet.jsx';
 
 /** Content of one specific version, fetched on demand (history is not polled). */
@@ -37,7 +38,12 @@ function SupportList({ label, teams }) {
       <span className="label">{label}</span>{' '}
       {teams.length === 0
         ? <span className="none">none yet</span>
-        : teams.map((t) => t.country_name).join(', ')}
+        : teams.map((team, index) => (
+            <React.Fragment key={team.team_id}>
+              {index > 0 && ', '}
+              <CountryLink name={team.country_name} />
+            </React.Fragment>
+          ))}
     </div>
   );
 }
@@ -64,7 +70,7 @@ function VersionPicker({ versions, value, onChange, allowCurrent = true, label =
 
 /* ------------------------------------------------------------ info panes */
 
-function PropositionPane({ proposition, on, hasAmendmentOpen }) {
+function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
   const own = proposition.is_own_team;
   const draft = proposition.status === 'draft';
   const live = proposition.status === 'active';
@@ -78,7 +84,7 @@ function PropositionPane({ proposition, on, hasAmendmentOpen }) {
       </div>
       <div className="infobar__meta">
         #{proposition.id} · {proposition.project_name} · initiated by{' '}
-        <strong>{proposition.initiating_team.country_name}</strong> · version{' '}
+        <CountryLink name={proposition.initiating_team.country_name} /> · version{' '}
         {proposition.current_version?.number} of {proposition.version_count} · updated{' '}
         {formatDate(proposition.updated_at)}
       </div>
@@ -98,14 +104,21 @@ function PropositionPane({ proposition, on, hasAmendmentOpen }) {
         </>
       )}
 
+      {!canAct && (
+        <div className="observing">
+          You are here as event secretariat: everything is visible to you, and the drafting —
+          proposing, sponsoring, approving — stays with the delegations.
+        </div>
+      )}
+
       <div className="infobar__actions">
-        {draft && own && (
+        {canAct && draft && own && (
           <>
             <button className="btn" onClick={on.editProposition}>Edit draft</button>
             <button className="btn btn--redline" onClick={on.submitProposition}>Submit to committee</button>
           </>
         )}
-        {live && (
+        {canAct && live && (
           <>
             <button
               className={proposition.my_roles.sponsor ? 'btn' : 'btn btn--primary'}
@@ -124,7 +137,7 @@ function PropositionPane({ proposition, on, hasAmendmentOpen }) {
             )}
           </>
         )}
-        {own && proposition.status !== 'withdrawn' && (
+        {canAct && own && proposition.status !== 'withdrawn' && (
           <button className="btn btn--ghost btn--small" onClick={on.withdrawProposition}>Withdraw</button>
         )}
       </div>
@@ -132,7 +145,7 @@ function PropositionPane({ proposition, on, hasAmendmentOpen }) {
   );
 }
 
-function AmendmentPane({ amendment, on, onClose }) {
+function AmendmentPane({ amendment, on, onClose, canAct }) {
   const { approval } = amendment;
   return (
     <div className="infobar__pane">
@@ -150,9 +163,17 @@ function AmendmentPane({ amendment, on, onClose }) {
         </button>
       </div>
       <div className="infobar__meta">
-        Proposed by <strong>{amendment.proposing_team.country_name}</strong>
+        Proposed by <CountryLink name={amendment.proposing_team.country_name} />
         {amendment.cosponsors.length > 0 && (
-          <> with {amendment.cosponsors.map((c) => c.country_name).join(', ')}</>
+          <>
+            {' with '}
+            {amendment.cosponsors.map((cosponsor, index) => (
+              <React.Fragment key={cosponsor.team_id}>
+                {index > 0 && ', '}
+                <CountryLink name={cosponsor.country_name} />
+              </React.Fragment>
+            ))}
+          </>
         )}
         {' '}· against version {amendment.base_version.number} · {formatDate(amendment.updated_at)}
       </div>
@@ -161,20 +182,20 @@ function AmendmentPane({ amendment, on, onClose }) {
       )}
 
       <div className="infobar__actions">
-        {amendment.can_approve && (
+        {canAct && amendment.can_approve && (
           <button className="btn btn--redline" onClick={on.approve}>Approve this amendment</button>
         )}
         {amendment.my_approval && <span className="stamp stamp--adopted">you approved</span>}
-        {amendment.status === 'draft' && amendment.is_own_team && (
+        {canAct && amendment.status === 'draft' && amendment.is_own_team && (
           <>
             <button className="btn" onClick={on.editAmendment}>Edit</button>
             <button className="btn btn--redline" onClick={on.submitAmendment}>Submit to committee</button>
           </>
         )}
-        {amendment.status === 'frozen' && amendment.is_own_team && (
+        {canAct && amendment.status === 'frozen' && amendment.is_own_team && (
           <button className="btn btn--primary" onClick={on.reapply}>Reapply to the current version</button>
         )}
-        {['pending', 'frozen', 'draft'].includes(amendment.status) && amendment.is_own_team && (
+        {canAct && ['pending', 'frozen', 'draft'].includes(amendment.status) && amendment.is_own_team && (
           <>
             <button className="btn" onClick={on.detach}>Detach as its own proposition</button>
             <button className="btn btn--ghost btn--small" onClick={on.withdrawAmendment}>Withdraw</button>
@@ -188,6 +209,7 @@ function AmendmentPane({ amendment, on, onClose }) {
 /* ---------------------------------------------------------------- center */
 
 export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on }) {
+  const canAct = user.role !== 'secretariat';
   const proposition = detail?.proposition;
   const versions = detail?.versions || [];
   const [viewVersionId, setViewVersionId] = useState(null);
@@ -209,8 +231,9 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
     return (
       <div className="workspace">
         <Blank mark="¶" title="Nothing open">
-          Pick a proposition on the left to read it, or start one of your own. Drafts stay inside
-          your delegation until you submit them.
+          {canAct
+            ? 'Pick a proposition on the left to read it, or start one of your own. Drafts stay inside your delegation until you submit them.'
+            : 'Pick a proposition on the left to read it. Delegations’ private drafts stay theirs until they submit them.'}
         </Blank>
       </div>
     );
@@ -230,12 +253,18 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
   return (
     <div className="workspace">
       <div className={`infobar${amendment ? ' infobar--split' : ''}`}>
-        <PropositionPane proposition={proposition} on={on} hasAmendmentOpen={!!amendment} />
+        <PropositionPane
+          proposition={proposition}
+          on={on}
+          hasAmendmentOpen={!!amendment}
+          canAct={canAct}
+        />
         {amendment && (
           <AmendmentPane
-            amendment={{ ...amendment, my_team_id: user.team.id }}
+            amendment={{ ...amendment, my_team_id: user.team?.id ?? null }}
             on={on}
             onClose={onClearAmendment}
+            canAct={canAct}
           />
         )}
       </div>

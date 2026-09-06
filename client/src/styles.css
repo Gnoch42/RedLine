@@ -773,6 +773,68 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chosen__desc { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
 .chosen__meta { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-top: 6px; }
 
+/* A country name, anywhere it appears, is a way into its card. */
+.countrylink {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
+}
+.countrylink:hover { text-decoration-color: var(--redline); color: var(--redline); }
+
+.delegation { margin-bottom: 20px; }
+.delegation__head {
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.delegation__committee {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 600;
+}
+.delegation__empty { margin: 0; font-size: 13px; color: var(--ink-3); font-style: italic; }
+.delegation__props { margin-top: 10px; }
+.row--person { align-items: flex-start; }
+.person__contact { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.person__contact a { color: inherit; }
+.person__contact a:hover { color: var(--redline); }
+
+/* Choosing what you are at the conference. */
+.roles { display: flex; flex-direction: column; gap: 6px; }
+.role {
+  text-align: left;
+  padding: 8px 11px;
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  cursor: pointer;
+}
+.role:hover { background: #fff; }
+.role[aria-pressed="true"] { border-color: var(--ink-3); border-left-color: var(--redline); background: #fff; }
+.role__name { display: block; font-weight: 600; font-size: 13px; }
+.role__blurb { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+
+/* What the secretariat sees in place of the delegation's controls. */
+.observing {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--frost);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--frost-soft);
+  color: #37444f;
+  font-size: 13px;
+  max-width: 520px;
+}
+
 .linky {
   border: 0;
   background: none;

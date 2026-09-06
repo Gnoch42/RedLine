@@ -48,8 +48,12 @@ async function preflight() {
   console.log(`Seeding ${BASE} (database: ${health.db})`);
 }
 
-const register = async (email, name, country) =>
-  (await call('/auth/register', { method: 'POST', body: { email, delegate_name: name, country } })).token;
+let phoneCounter = 100;
+const register = async (email, name, country, extra = {}) =>
+  (await call('/auth/register', {
+    method: 'POST',
+    body: { email, delegate_name: name, country, phone: `+1 514 555 0${phoneCounter++}`, ...extra },
+  })).token;
 
 const TEXT = `The Committee,
 
@@ -109,6 +113,13 @@ const main = async () => {
     method: 'POST', token: colleague, body: { join_code: fr.team.join_code },
   });
 
+  // A faculty advisor beside them, and the event's secretariat.
+  const advisor = await register(`roy.${stamp}@example.org`, 'Mme Roy', 'France', { role: 'faculty' });
+  await call('/teams/join', { method: 'POST', token: advisor, body: { join_code: fr.team.join_code } });
+
+  const staffToken = await register(`marc.${stamp}@example.org`, 'Marc Aubry', '', { role: 'secretariat' });
+  const { user: staff } = await call('/auth/me', { token: staffToken });
+
   const { projects } = await call(`/committees/${fr.committee.id}/projects`, { token: founder });
   const project = projects[0];
 
@@ -165,6 +176,8 @@ const main = async () => {
     if (country === 'France') continue;
     console.log(line(user.email, user.team.join_code, country));
   }
+  console.log(line(`roy.${stamp}@example.org`, fr.team.join_code, 'France — faculty advisor'));
+  console.log(`\n  ${staff.email.padEnd(30)} ${staff.personal_code}   Secretariat — reads every committee`);
   console.log('\nMore countries need no code: they pick the committee from the list after');
   console.log('creating an account.');
   console.log(`\nOpen ${BASE}\n`);

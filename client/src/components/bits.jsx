@@ -1,4 +1,28 @@
 import React from 'react';
+import { CountryLink } from './CountryCard.jsx';
+
+/**
+ * An explorer card. A div rather than a button, because country names inside it
+ * are buttons of their own and nesting them would be invalid.
+ */
+export function Card({ className, onClick, children }) {
+  return (
+    <div
+      className={className}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export function Stamp({ status }) {
   if (!status) return null;
@@ -65,7 +89,7 @@ export function ApprovalTally({ approval, myTeamId, compact = false }) {
               <span className={`tally__box${sponsor.approved ? ' tally__box--checked' : ''}`}>
                 {sponsor.approved ? '✓' : ''}
               </span>
-              {sponsor.country_name}
+              <CountryLink name={sponsor.country_name} />
               {sponsor.team_id === myTeamId && <span className="label">you</span>}
             </li>
           ))}

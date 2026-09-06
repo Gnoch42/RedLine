@@ -62,12 +62,22 @@ REDLINE_URL=http://localhost:8080 npm run seed
 
 ## How a simulation gets set up
 
-An account is a **person**: a name, an email, and the country they represent. The country
-is chosen from a list — the 193 UN member states, with observers grouped at the top and a
-free-text option for any observer not listed — never typed, so no delegation ends up filed
-under a misspelling. It carries over as the default every time that delegate registers a
-delegation, and can still be overridden: one account holds as many seats as you like,
-which is the usual case when the same delegate sits on several committees.
+An account is a **person**: a name, an email, an optional phone or WhatsApp number, and
+what they are at the conference.
+
+- **Delegate** — represents a country. The country is chosen from a list (the 193 UN member
+  states, with observers grouped at the top and a free-text option for any observer not
+  listed), never typed, so no delegation ends up filed under a misspelling. It carries over
+  as the default every time they register a delegation, and can still be overridden: one
+  account holds as many seats as you like, which is the usual case when the same delegate
+  sits on several committees.
+- **Faculty** — an accompanying teacher or advisor. They sit with their delegation, using
+  its join code, and have the same hands as its delegates.
+- **Secretariat** — the people running the event. They pick no country, hold no delegation,
+  and can open any committee to read it. They propose nothing, sponsor nothing and approve
+  nothing, and they never occupy one of the committee's seats, so they cannot move the 20%
+  threshold. Having no delegation whose code they could share, they get a personal sign-in
+  code of their own.
 
 1. One person **creates the committee**: its name, how many countries are seated in it,
    and the agenda items.
@@ -75,9 +85,9 @@ which is the usual case when the same delegate sits on several committees.
    sees. Joining is one click: the country comes from the account, and the ones already
    spoken for on that committee are shown but cannot be picked, so a clash is visible
    before anything is submitted. Nothing has to be handed out for this to work.
-3. The **delegation join code** goes to a delegation's own delegates. It is both the
-   invitation and the password: signing in is an email plus that code, and it can be
-   copied or scanned as a QR.
+3. The **delegation join code** goes to a delegation's own delegates and its faculty. It
+   is both the invitation and the password: signing in is an email plus that code, and it
+   can be copied or scanned as a QR.
 
 A committee still has a code of its own, and `POST /api/teams` still accepts it, but the
 interface no longer asks anyone for it — the list is the way in.
@@ -109,6 +119,14 @@ moderator; nothing in the app requires elevated privileges, by design.
 - **20% to present.** Distinct delegations backing a proposition as sponsor and/or
   signatory, over the seat count fixed when the committee was created. A delegation
   holding both roles counts once.
+
+## Finding people
+
+Any country name in the interface — on a card, in a sponsor list, beside an amendment —
+opens that country's card: who speaks for it on each committee, with their role, email and
+phone, and what that delegation has put on the table there. Contact details are shared
+across the whole conference on purpose: finding the delegate you need to negotiate with is
+the point of it. Leave the phone field empty to keep that one to yourself.
 
 ## What the interface looks like
 
@@ -154,6 +172,15 @@ Places where the build spec was silent, or where the implementation makes a call
 - **The account's country is a default, not a constraint.** A delegate who speaks for
   someone else on another committee changes it there, and the seats they already hold are
   untouched.
+- **Faculty have the same hands as delegates.** They sit inside a delegation, see its
+  private drafts, and can sponsor and approve on its behalf. That is a choice, not a
+  finding: restricting them to reading would be a one-line change to `requireDelegation`.
+- **The secretariat can still edit committee settings and the agenda.** Setting up the room
+  is administration, not drafting, and every delegate can do it too — there is no
+  moderator. What they cannot do is put text on the table or support it.
+- **The secretariat sees every committee, and everyone's contact details are visible to
+  everyone.** Both follow from what the tool is for. A conference that needs either of them
+  narrowed should say so before using this with minors' phone numbers in it.
 - **`total_members` lives only on the committee.** The spec listed it on both `Team` and
   `Committee`; storing the same number twice only invites drift.
 - **Draft privacy is per user, so propositions and amendments carry an author user**
@@ -194,14 +221,16 @@ scripts/seed.js   The worked example.
 ### API
 
 ```
-POST   /api/auth/register              { delegate_name, email, country }
+POST   /api/auth/register              { delegate_name, email, phone, role, country }
 POST   /api/auth/login                 { email, join_code }   -> seats you in that delegation
+                                       (the secretariat presents its own personal code)
 POST   /api/auth/logout
-GET    /api/auth/me                    the delegate, their seats, the active one
-PATCH  /api/auth/me                    { delegate_name, country }
-POST   /api/auth/switch                { team_id }  move to another of your seats
+GET    /api/auth/me                    the person, their seats, the active one
+PATCH  /api/auth/me                    { delegate_name, phone, country }
+POST   /api/auth/switch                { team_id } — or { committee_id } for the secretariat
 
 GET    /api/committees                 every committee, with seats taken and your own
+GET    /api/countries/:name            who speaks for a country, on every committee
 POST   /api/committees                 create a committee and its first delegation
 PATCH  /api/committees/:id             { name, description, total_members }
 POST   /api/teams                      { committee_id | committee_code, country_name }

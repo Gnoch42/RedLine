@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { usePoll } from '../lib/usePoll.js';
 import { Wordmark, Toast } from './bits.jsx';
@@ -7,26 +7,39 @@ import { ProjectExplorer } from './ProjectExplorer.jsx';
 import { AmendmentExplorer } from './AmendmentExplorer.jsx';
 import { Workspace } from './Workspace.jsx';
 import { PropositionEditor, AmendmentEditor, ProjectForm } from './editors.jsx';
+import { CountryProvider } from './CountryCard.jsx';
 
-/** Move between the committees this delegate sits on, or go and join another. */
+/**
+ * Move between the committees this delegate sits on, or go and join another.
+ * The secretariat holds no seats, so for them it is a list of every committee.
+ */
 function CommitteeSwitcher({ user, onSwitch, onAddSeat }) {
-  const seats = user.seats || [];
+  const staff = user.role === 'secretariat';
+  const [all, setAll] = useState([]);
+
+  useEffect(() => {
+    if (!staff) return;
+    api('/committees').then(({ committees }) => setAll(committees)).catch(() => setAll([]));
+  }, [staff, user.committee.id]);
+
+  const options = staff
+    ? all.map((c) => [c.id, c.name])
+    : (user.seats || []).map((seat) => [seat.team_id, `${seat.committee_name} · ${seat.country_name}`]);
+
   return (
     <label className="switcher">
       <span className="label">Committee</span>
       <select
-        value={user.team.id}
+        value={staff ? user.committee.id : user.team.id}
         onChange={(event) => {
           if (event.target.value === 'add') onAddSeat();
           else onSwitch(Number(event.target.value));
         }}
       >
-        {seats.map((seat) => (
-          <option key={seat.team_id} value={seat.team_id}>
-            {seat.committee_name} · {seat.country_name}
-          </option>
+        {options.map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
         ))}
-        <option value="add">+ Another committee…</option>
+        {!staff && <option value="add">+ Another committee…</option>}
       </select>
     </label>
   );
@@ -93,9 +106,10 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
     setPanel('center');
   };
 
-  const switchCommittee = async (teamId) => {
+  const switchCommittee = async (id) => {
     try {
-      const { user: next } = await api('/auth/switch', { method: 'POST', body: { team_id: teamId } });
+      const body = user.role === 'secretariat' ? { committee_id: id } : { team_id: id };
+      const { user: next } = await api('/auth/switch', { method: 'POST', body });
       setSelectedPropositionId(null);
       setSelectedAmendmentId(null);
       setPanel('left');
@@ -169,8 +183,10 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
   }), [act, proposition, amendment]);
 
   const currentVersion = proposition?.current_version;
+  const canAct = user.role !== 'secretariat';
 
   return (
+    <CountryProvider>
     <div className="app">
       <header className="masthead">
         <Wordmark />
@@ -188,7 +204,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
         </div>
         <span className="masthead__spacer" />
         <div className="masthead__identity">
-          <div className="country">{user.team.country_name}</div>
+          <div className="country">{user.team ? user.team.country_name : 'Secretariat'}</div>
           <div className="delegate">{user.delegate_name}</div>
         </div>
         <button className="btn btn--small" onClick={() => setModal({ type: 'committee' })}>Committee</button>
@@ -204,6 +220,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
           onNewProposition={(projectId) => setModal({ type: 'new-proposition', projectId })}
           onNewProject={() => setModal({ type: 'new-project' })}
           onOpenSettings={() => setModal({ type: 'committee', tab: 'agenda' })}
+          canAct={canAct}
         />
 
         <Workspace
@@ -220,7 +237,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
           selectedId={selectedAmendmentId}
           onSelect={openAmendment}
           onNew={() => setModal({ type: 'new-amendment' })}
-          canPropose={proposition?.status === 'active'}
+          canPropose={canAct && proposition?.status === 'active'}
         />
       </div>
 
@@ -348,5 +365,6 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
         />
       )}
     </div>
+    </CountryProvider>
   );
 }

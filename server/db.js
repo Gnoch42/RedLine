@@ -72,6 +72,20 @@ function migrate() {
     }
   }
 
+  for (const [column, ddl] of [
+    ['phone', "ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''"],
+    ['role', "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'delegate'"],
+    ['personal_code', 'ALTER TABLE users ADD COLUMN personal_code TEXT'],
+  ]) {
+    if (!columnsOf('users').includes(column)) db.exec(ddl);
+  }
+
+  if (!columnsOf('sessions').includes('active_committee_id')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN active_committee_id INTEGER REFERENCES committees(id)');
+    db.exec(`UPDATE sessions SET active_committee_id = (
+               SELECT t.committee_id FROM teams t WHERE t.id = sessions.active_team_id)`);
+  }
+
   if (!columnsOf('users').includes('country')) {
     db.exec("ALTER TABLE users ADD COLUMN country TEXT NOT NULL DEFAULT ''");
     // Seed it from the delegation they are already in, so an existing delegate

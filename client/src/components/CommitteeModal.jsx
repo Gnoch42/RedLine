@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { CodeCard } from './CodeCard.jsx';
 import { CountrySelect } from './CountrySelect.jsx';
+import { CountryLink } from './CountryCard.jsx';
 
 const joinLink = (code) => `${window.location.origin}/?join=${encodeURIComponent(code)}`;
 
@@ -204,6 +205,21 @@ function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
 }
 
 function Codes({ user }) {
+  if (user.role === 'secretariat') {
+    return (
+      <>
+        {user.personal_code && (
+          <CodeCard
+            code={user.personal_code}
+            what="Your sign-in code. It belongs to you, not to a delegation — keep it."
+          />
+        )}
+        <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+          Delegations hand out their own join codes; yours gets you into every committee.
+        </p>
+      </>
+    );
+  }
   return (
     <>
       <CodeCard
@@ -224,13 +240,17 @@ function Codes({ user }) {
 function Account({ user, onSaved }) {
   const [values, setValues] = useState({
     delegate_name: user.delegate_name,
+    phone: user.phone || '',
     country: user.country || '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
-  const dirty = values.delegate_name !== user.delegate_name || values.country !== (user.country || '');
+  const staff = user.role === 'secretariat';
+  const dirty = values.delegate_name !== user.delegate_name
+    || values.phone !== (user.phone || '')
+    || values.country !== (user.country || '');
 
   const save = async () => {
     setBusy(true);
@@ -257,21 +277,33 @@ function Account({ user, onSaved }) {
           onChange={(e) => { setValues((v) => ({ ...v, delegate_name: e.target.value })); setSaved(false); }}
         />
       </label>
-      <div className="field">
-        <span className="label">The country you represent</span>
-        <CountrySelect
-          value={values.country}
-          onChange={(country) => { setValues((v) => ({ ...v, country })); setSaved(false); }}
+      <label className="field">
+        <span className="label">Phone or WhatsApp</span>
+        <input
+          type="tel"
+          value={values.phone}
+          onChange={(e) => { setValues((v) => ({ ...v, phone: e.target.value })); setSaved(false); }}
+          placeholder="+1 514 555 0101"
         />
-        <span className="hint">
-          The default when you register a delegation. Changing it leaves the delegations you
-          already hold untouched.
-        </span>
-      </div>
+        <span className="hint">Optional, and visible to everyone at the conference.</span>
+      </label>
+      {!staff && (
+        <div className="field">
+          <span className="label">The country you represent</span>
+          <CountrySelect
+            value={values.country}
+            onChange={(country) => { setValues((v) => ({ ...v, country })); setSaved(false); }}
+          />
+          <span className="hint">
+            The default when you register a delegation. Changing it leaves the delegations you
+            already hold untouched.
+          </span>
+        </div>
+      )}
       <button
         className="btn"
         onClick={save}
-        disabled={busy || !dirty || !values.delegate_name.trim() || !values.country.trim()}
+        disabled={busy || !dirty || !values.delegate_name.trim() || (!staff && !values.country.trim())}
       >
         {busy ? 'Saving…' : saved && !dirty ? 'Saved ✓' : 'Save'}
       </button>
@@ -286,8 +318,8 @@ function Delegations({ user, data, onSaved }) {
       <div className="rows" style={{ marginTop: 6 }}>
         {(data?.teams || []).map((team) => (
           <div className="row" key={team.id}>
-            <strong>{team.country_name}</strong>
-            {team.id === user.team.id && <span className="label">you</span>}
+            <CountryLink name={team.country_name} className="row__country" />
+            {team.id === user.team?.id && <span className="label">you</span>}
             <span className="spacer" />
             <span style={{ color: 'var(--ink-3)' }}>{team.delegate_count} delegate(s)</span>
           </div>
@@ -298,21 +330,46 @@ function Delegations({ user, data, onSaved }) {
         threshold is always measured against all {user.committee.total_members}.
       </p>
 
-      <div style={{ marginTop: 18 }}>
-        <span className="label">Your delegation</span>
-        <div className="rows" style={{ marginTop: 6 }}>
-          {(data?.delegates || []).map((delegate) => (
-            <div className="row" key={delegate.id}>
-              <strong>{delegate.delegate_name}</strong>
-              {delegate.country && delegate.country !== user.team.country_name && (
-                <span className="label">{delegate.country}</span>
-              )}
-              <span className="spacer" />
-              <code>{delegate.email}</code>
-            </div>
-          ))}
+      {user.team && (
+        <div style={{ marginTop: 18 }}>
+          <span className="label">Your delegation</span>
+          <div className="rows" style={{ marginTop: 6 }}>
+            {(data?.delegates || []).map((delegate) => (
+              <div className="row row--person" key={delegate.id}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <strong>{delegate.delegate_name}</strong>
+                  {delegate.role !== 'delegate' && (
+                    <span className="label" style={{ marginLeft: 6 }}>{delegate.role}</span>
+                  )}
+                  <span className="person__contact">
+                    <a href={`mailto:${delegate.email}`}>{delegate.email}</a>
+                    {delegate.phone && <>{' · '}{delegate.phone}</>}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {(data?.secretariat || []).length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <span className="label">Event secretariat</span>
+          <div className="rows" style={{ marginTop: 6 }}>
+            {data.secretariat.map((person) => (
+              <div className="row row--person" key={person.id}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <strong>{person.delegate_name}</strong>
+                  <span className="person__contact">
+                    <a href={`mailto:${person.email}`}>{person.email}</a>
+                    {person.phone && <>{' · '}{person.phone}</>}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Account user={user} onSaved={onSaved} />
     </>

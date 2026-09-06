@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { one, all, run, tx, uniqueCode } from '../db.js';
 import { conflict, denied, missing, int, str } from '../http.js';
-import { requireUser, requireTeam, serializeUser, userFromToken, joinTeam } from '../auth.js';
+import {
+  requireUser, requireCommittee, serializeUser, userFromToken, joinTeam, isSecretariat,
+} from '../auth.js';
 import { serializeProposition } from '../model.js';
 
 export const orgRoutes = Router();
@@ -92,6 +94,9 @@ orgRoutes.get('/committees', requireUser, (req, res) => {
  * (picked from the directory above) or by its shared code.
  */
 orgRoutes.post('/teams', requireUser, (req, res) => {
+  if (isSecretariat(req.user)) {
+    throw denied('The secretariat does not sit in a delegation — open any committee instead.');
+  }
   const countryName = str(req.body, 'country_name', { max: 120 });
 
   const cttee = req.body?.committee_id !== undefined
@@ -123,6 +128,9 @@ orgRoutes.post('/teams', requireUser, (req, res) => {
 
 /** Join an existing delegation with its join code (or QR link). */
 orgRoutes.post('/teams/join', requireUser, (req, res) => {
+  if (isSecretariat(req.user)) {
+    throw denied('The secretariat does not sit in a delegation — open any committee instead.');
+  }
   const joinCode = str(req.body, 'join_code', { max: 40 }).toUpperCase();
   const team = one('SELECT * FROM teams WHERE join_code = ?', joinCode);
   if (!team) throw missing('That delegation code is not valid.');
@@ -131,7 +139,7 @@ orgRoutes.post('/teams/join', requireUser, (req, res) => {
 });
 
 /** The committee the caller sits in: delegations, delegates, codes. */
-orgRoutes.get('/committees/:id', requireTeam, (req, res) => {
+orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
   const cttee = one('SELECT * FROM committees WHERE id = ?', req.user.committee_id);
   const teams = all(
@@ -140,14 +148,21 @@ orgRoutes.get('/committees/:id', requireTeam, (req, res) => {
        FROM teams t WHERE t.committee_id = ? ORDER BY t.country_name`,
     cttee.id
   );
-  const delegates = all(
-    `SELECT u.id, u.email, u.delegate_name, u.country
+  const delegates = req.user.team_id ? all(
+    `SELECT u.id, u.email, u.delegate_name, u.phone, u.role, u.country
        FROM memberships m
        JOIN users u ON u.id = m.user_id
       WHERE m.team_id = ? ORDER BY u.delegate_name`,
     req.user.team_id
+  ) : [];
+  // Event staff belong to no committee in particular, so they are listed for
+  // every one — the point of having them here is being able to reach them.
+  const secretariat = all(
+    `SELECT id, email, delegate_name, phone FROM users
+      WHERE role = 'secretariat' ORDER BY delegate_name`
   );
   res.json({
+    secretariat,
     committee: {
       id: cttee.id,
       name: cttee.name,
@@ -166,7 +181,7 @@ orgRoutes.get('/committees/:id', requireTeam, (req, res) => {
  * may correct them — including the seat count, which is the denominator of the
  * 20% threshold and so changes every eligibility figure at once.
  */
-orgRoutes.patch('/committees/:id', requireTeam, (req, res) => {
+orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
   const name = str(req.body, 'name', { max: 120 });
   const description = str(req.body, 'description', { required: false, max: 2000 });
@@ -180,7 +195,7 @@ orgRoutes.patch('/committees/:id', requireTeam, (req, res) => {
 
 /* ------------------------------------------------------------- agenda */
 
-orgRoutes.get('/committees/:id/projects', requireTeam, (req, res) => {
+orgRoutes.get('/committees/:id/projects', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
   res.json({
     projects: all(
@@ -193,7 +208,7 @@ orgRoutes.get('/committees/:id/projects', requireTeam, (req, res) => {
   });
 });
 
-orgRoutes.post('/committees/:id/projects', requireTeam, (req, res) => {
+orgRoutes.post('/committees/:id/projects', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
   const name = str(req.body, 'name', { max: 200 });
   const next = one(
@@ -221,7 +236,7 @@ function ownProject(req) {
  * up at: the whole list is renumbered around it, since simply writing a new
  * position would collide with whatever already holds it.
  */
-orgRoutes.patch('/projects/:id', requireTeam, (req, res) => {
+orgRoutes.patch('/projects/:id', requireCommittee, (req, res) => {
   const project = ownProject(req);
   const name = str(req.body, 'name', { max: 200 });
 
@@ -246,7 +261,7 @@ orgRoutes.patch('/projects/:id', requireTeam, (req, res) => {
 });
 
 /** Only an empty agenda item can go — deleting one would take its work with it. */
-orgRoutes.delete('/projects/:id', requireTeam, (req, res) => {
+orgRoutes.delete('/projects/:id', requireCommittee, (req, res) => {
   const project = ownProject(req);
   const { count } = one('SELECT COUNT(*) AS count FROM propositions WHERE project_id = ?', project.id);
   if (count > 0) {
@@ -260,7 +275,7 @@ orgRoutes.delete('/projects/:id', requireTeam, (req, res) => {
  * Everything the left-hand explorer needs, in one request — the client polls
  * this every few seconds rather than fanning out per project.
  */
-orgRoutes.get('/committees/:id/board', requireTeam, (req, res) => {
+orgRoutes.get('/committees/:id/board', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
   const projects = all(
     `SELECT id, name, position FROM projects
@@ -289,4 +304,47 @@ orgRoutes.get('/committees/:id/board', requireTeam, (req, res) => {
       req.user.committee_id
     ),
   });
+});
+
+/**
+ * A country's card: who speaks for it, on which committee, and how to reach
+ * them. Contact details are shared across the whole conference on purpose —
+ * finding the delegate you need to negotiate with is the point.
+ */
+orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
+  const name = String(req.params.name || '').trim();
+  if (!name) throw missing('No country named.');
+
+  const teams = all(
+    `SELECT t.id AS team_id, t.country_name, c.id AS committee_id, c.name AS committee_name
+       FROM teams t
+       JOIN committees c ON c.id = t.committee_id
+      WHERE lower(t.country_name) = lower(?)
+      ORDER BY c.name COLLATE NOCASE ASC`,
+    name
+  );
+  if (teams.length === 0) throw missing(`No delegation is registered for ${name}.`);
+
+  const delegations = teams.map((team) => ({
+    ...team,
+    delegates: all(
+      `SELECT u.id, u.delegate_name, u.email, u.phone, u.role
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.team_id = ?
+        ORDER BY CASE u.role WHEN 'delegate' THEN 0 ELSE 1 END, u.delegate_name`,
+      team.team_id
+    ),
+    // What this delegation has put on the table in that committee.
+    propositions: all(
+      `SELECT p.id, p.name, p.status
+         FROM propositions p
+         JOIN projects pr ON pr.id = p.project_id
+        WHERE p.initiating_team_id = ? AND p.status <> 'draft'
+        ORDER BY p.id ASC`,
+      team.team_id
+    ),
+  }));
+
+  res.json({ country: teams[0].country_name, delegations });
 });

@@ -31,14 +31,28 @@ function useSubmit(handler) {
  * committees. Those come from the codes they present next, and there can be
  * several of them.
  */
+const ROLES = [
+  ['delegate', 'Delegate', 'You represent a country in committee.'],
+  ['faculty', 'Faculty', 'You accompany a delegation as its teacher or advisor.'],
+  ['secretariat', 'Secretariat', 'You run the event. You watch every committee and take no part in the drafting.'],
+];
+
 function Credentials({ onAuthenticated, prefillJoinCode }) {
   const [mode, setMode] = useState(prefillJoinCode ? 'login' : 'register');
   const [country, setCountry] = useState('');
+  const [role, setRole] = useState('delegate');
+  const staff = role === 'secretariat';
 
   const form = useSubmit(async (data) => {
     const path = mode === 'register' ? '/auth/register' : '/auth/login';
     const body = mode === 'register'
-      ? { delegate_name: data.get('delegate_name'), email: data.get('email'), country }
+      ? {
+          delegate_name: data.get('delegate_name'),
+          email: data.get('email'),
+          phone: data.get('phone'),
+          role,
+          ...(staff ? {} : { country }),
+        }
       : { email: data.get('email'), join_code: data.get('join_code') };
     const result = await api(path, { method: 'POST', body });
     setToken(result.token);
@@ -60,14 +74,35 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
             <span className="label">Your name</span>
             <input name="delegate_name" required placeholder="Camille Fournier" autoComplete="name" />
           </label>
+
           <div className="field">
-            <span className="label">The country you represent</span>
-            <CountrySelect value={country} onChange={setCountry} />
-            <span className="hint">
-              Filled in for you whenever you register a delegation, so nobody ends up filed under
-              a country they did not mean.
-            </span>
+            <span className="label">You are here as</span>
+            <div className="roles">
+              {ROLES.map(([key, label, blurb]) => (
+                <button
+                  type="button"
+                  key={key}
+                  className="role"
+                  aria-pressed={role === key}
+                  onClick={() => setRole(key)}
+                >
+                  <span className="role__name">{label}</span>
+                  <span className="role__blurb">{blurb}</span>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {!staff && (
+            <div className="field">
+              <span className="label">The country you represent</span>
+              <CountrySelect value={country} onChange={setCountry} />
+              <span className="hint">
+                Filled in for you whenever you register a delegation, so nobody ends up filed
+                under a country they did not mean.
+              </span>
+            </div>
+          )}
         </>
       )}
 
@@ -77,6 +112,17 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
                autoComplete="email" />
         {mode === 'register' && <span className="hint">How we recognise you next time.</span>}
       </label>
+
+      {mode === 'register' && (
+        <label className="field">
+          <span className="label">Phone or WhatsApp</span>
+          <input name="phone" type="tel" placeholder="+1 514 555 0101" autoComplete="tel" />
+          <span className="hint">
+            Optional, and shown to everyone at the conference — it is how other delegations reach
+            you between sessions.
+          </span>
+        </label>
+      )}
 
       {mode === 'login' && (
         <label className="field">
@@ -97,7 +143,7 @@ function Credentials({ onAuthenticated, prefillJoinCode }) {
       <button
         type="submit"
         className="btn btn--primary btn--block"
-        disabled={form.busy || (mode === 'register' && !country.trim())}
+        disabled={form.busy || (mode === 'register' && !staff && !country.trim())}
       >
         {form.busy ? 'Working…' : mode === 'register' ? 'Create account' : 'Sign in'}
       </button>
@@ -139,7 +185,8 @@ function JoinDelegation({ onUser, prefillJoinCode }) {
  * The committees on this instance, to be picked from rather than reached with a
  * code. Registering is then one choice — the country comes from the account.
  */
-function JoinCommittee({ me, onUser, onSwitched }) {
+function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
+  const staff = me?.role === 'secretariat';
   const [committees, setCommittees] = useState(null);
   const [filter, setFilter] = useState('');
   const [chosen, setChosen] = useState(null);
@@ -156,6 +203,11 @@ function JoinCommittee({ me, onUser, onSwitched }) {
 
   const choose = (committee) => {
     setError(null);
+    // The secretariat holds no seat anywhere: opening a room is all there is.
+    if (staff) {
+      onOpenCommittee(committee.id);
+      return;
+    }
     // Already seated here: this is a way back in, not a second delegation.
     if (committee.my_team_id) {
       onSwitched(committee.my_team_id);
@@ -188,8 +240,9 @@ function JoinCommittee({ me, onUser, onSwitched }) {
   if (committees.length === 0) {
     return (
       <p className="lead">
-        No committees have been set up yet. Start the first one on the next tab — whoever comes
-        after you will find it here.
+        {staff
+          ? 'No committees have been set up yet. They will appear here as they are created.'
+          : 'No committees have been set up yet. Start the first one on the next tab — whoever comes after you will find it here.'}
       </p>
     );
   }
@@ -267,7 +320,7 @@ function JoinCommittee({ me, onUser, onSwitched }) {
               {committee.description && <span className="seat__desc">{committee.description}</span>}
             </span>
             <span className="seat__committee">
-              {committee.my_team_id
+              {!staff && committee.my_team_id
                 ? 'you are seated here'
                 : `${committee.registered_teams}/${committee.total_members} seats`}
             </span>
@@ -382,9 +435,18 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
     onEnter(user);
   };
 
+  /** The secretariat's way in: a committee, without a delegation in it. */
+  const openCommittee = async (committeeId) => {
+    const { user } = await api('/auth/switch', {
+      method: 'POST', body: { committee_id: committeeId },
+    });
+    onEnter(user);
+  };
+
   const seats = me?.seats || [];
-  const choosing = me && !handover && seats.length > 0 && !seatingElsewhere;
-  const seating = me && !handover && (seats.length === 0 || seatingElsewhere);
+  const staff = me?.role === 'secretariat';
+  const choosing = me && !handover && !staff && seats.length > 0 && !seatingElsewhere;
+  const seating = me && !handover && (staff || seats.length === 0 || seatingElsewhere);
 
   return (
     <div className="lobby">
@@ -418,7 +480,25 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
           <SeatPicker me={me} onSit={switchSeat} onElsewhere={() => setSeatingElsewhere(true)} />
         )}
 
-        {seating && (
+        {seating && me.role === 'secretariat' && (
+          <>
+            <h2>Open a committee</h2>
+            <p className="lead">
+              Signed in as <strong>{me.delegate_name}</strong>, event secretariat. You can look
+              into any room; the drafting itself stays with the delegations.
+            </p>
+            {me.personal_code && (
+              <CodeCard
+                code={me.personal_code}
+                what="Your sign-in code. You have no delegation to share one with, so this one is yours — keep it."
+              />
+            )}
+            <JoinCommittee me={me} onUser={acceptUser} onSwitched={switchSeat}
+                           onOpenCommittee={openCommittee} />
+          </>
+        )}
+
+        {seating && me.role !== 'secretariat' && (
           <>
             <h2>Take your seat</h2>
             <p className="lead">
@@ -437,7 +517,8 @@ export function Lobby({ initialUser, onEnter, onCancel, prefillJoinCode, startSe
               </button>
             </div>
             {tab === 'browse' && (
-              <JoinCommittee me={me} onUser={acceptUser} onSwitched={switchSeat} />
+              <JoinCommittee me={me} onUser={acceptUser} onSwitched={switchSeat}
+                             onOpenCommittee={openCommittee} />
             )}
             {tab === 'code' && <JoinDelegation onUser={acceptUser} prefillJoinCode={prefillJoinCode} />}
             {tab === 'create' && <CreateCommittee me={me} onUser={acceptUser} />}

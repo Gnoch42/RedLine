@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { one, all, run, tx } from '../db.js';
 import { bad, conflict, missing, str } from '../http.js';
-import { requireTeam } from '../auth.js';
+import { requireCommittee, requireDelegation } from '../auth.js';
 import {
   getProposition, assertPropositionVisible, serializeProposition,
   versionsOf, versionNumber, newVersion, recordApproval, assertOwnTeam,
@@ -22,7 +22,7 @@ function visibleProposition(id, user) {
 
 /* ------------------------------------------------------- list / create */
 
-propositionRoutes.get('/projects/:id/propositions', requireTeam, (req, res) => {
+propositionRoutes.get('/projects/:id/propositions', requireCommittee, (req, res) => {
   const project = projectInCommittee(req.params.id, req.user);
   const rows = all(
     `SELECT p.*, t.country_name AS initiating_country, t.committee_id,
@@ -38,7 +38,7 @@ propositionRoutes.get('/projects/:id/propositions', requireTeam, (req, res) => {
   res.json({ propositions: rows.map((r) => serializeProposition(r, req.user)) });
 });
 
-propositionRoutes.post('/projects/:id/propositions', requireTeam, (req, res) => {
+propositionRoutes.post('/projects/:id/propositions', requireDelegation, (req, res) => {
   const project = projectInCommittee(req.params.id, req.user);
   const name = str(req.body, 'name', { max: 200 });
   const content = str(req.body, 'content', { required: false, max: 200000 });
@@ -68,7 +68,7 @@ propositionRoutes.post('/projects/:id/propositions', requireTeam, (req, res) => 
 
 /* -------------------------------------------------------------- read */
 
-propositionRoutes.get('/propositions/:id', requireTeam, (req, res) => {
+propositionRoutes.get('/propositions/:id', requireCommittee, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   res.json({
     proposition: serializeProposition(prop, req.user, { includeContent: true }),
@@ -76,7 +76,7 @@ propositionRoutes.get('/propositions/:id', requireTeam, (req, res) => {
   });
 });
 
-propositionRoutes.get('/propositions/:id/versions', requireTeam, (req, res) => {
+propositionRoutes.get('/propositions/:id/versions', requireCommittee, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   res.json({ versions: versionsOf(prop.id) });
 });
@@ -85,7 +85,7 @@ propositionRoutes.get('/propositions/:id/versions', requireTeam, (req, res) => {
  * Content of any two versions, for a side-by-side comparison. The diff itself is
  * computed in the browser (jsdiff) — the server just hands over both texts.
  */
-propositionRoutes.get('/propositions/:id/versions/diff', requireTeam, (req, res) => {
+propositionRoutes.get('/propositions/:id/versions/diff', requireCommittee, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   const load = (key) => {
     const id = Number(req.query[key]);
@@ -102,7 +102,7 @@ propositionRoutes.get('/propositions/:id/versions/diff', requireTeam, (req, res)
   res.json({ from: load('from'), to: load('to') });
 });
 
-propositionRoutes.get('/propositions/:id/versions/:versionId', requireTeam, (req, res) => {
+propositionRoutes.get('/propositions/:id/versions/:versionId', requireCommittee, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   const version = one(
     'SELECT * FROM versions WHERE id = ? AND proposition_id = ?',
@@ -124,7 +124,7 @@ propositionRoutes.get('/propositions/:id/versions/:versionId', requireTeam, (req
 /* ------------------------------------------------------- transitions */
 
 /** Edit the title/description of a draft (own delegation, before submission). */
-propositionRoutes.patch('/propositions/:id', requireTeam, (req, res) => {
+propositionRoutes.patch('/propositions/:id', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   assertOwnTeam(prop, req.user, 'the');
   if (prop.status !== 'draft') {
@@ -144,7 +144,7 @@ propositionRoutes.patch('/propositions/:id', requireTeam, (req, res) => {
  * A new version by direct edit. Only while the proposition is a private draft —
  * once it is active, the text moves only through the amendment process (§5.2).
  */
-propositionRoutes.post('/propositions/:id/versions', requireTeam, (req, res) => {
+propositionRoutes.post('/propositions/:id/versions', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   assertOwnTeam(prop, req.user, 'the');
   if (prop.status !== 'draft') {
@@ -164,7 +164,7 @@ propositionRoutes.post('/propositions/:id/versions', requireTeam, (req, res) => 
   });
 });
 
-propositionRoutes.patch('/propositions/:id/submit', requireTeam, (req, res) => {
+propositionRoutes.patch('/propositions/:id/submit', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   assertOwnTeam(prop, req.user, 'the');
   if (prop.status !== 'draft') throw conflict('This proposition has already been submitted.');
@@ -178,7 +178,7 @@ propositionRoutes.patch('/propositions/:id/submit', requireTeam, (req, res) => {
   });
 });
 
-propositionRoutes.post('/propositions/:id/withdraw', requireTeam, (req, res) => {
+propositionRoutes.post('/propositions/:id/withdraw', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   assertOwnTeam(prop, req.user, 'the');
   if (prop.status === 'withdrawn') throw conflict('Already withdrawn.');
@@ -206,11 +206,11 @@ function support(kind) {
 
 // Any delegation may take either role; the app does not police who "contributed
 // content" — there is no moderator to adjudicate it (§5.5).
-propositionRoutes.post('/propositions/:id/sponsor', requireTeam, support('sponsor'));
-propositionRoutes.post('/propositions/:id/sign', requireTeam, support('signatory'));
+propositionRoutes.post('/propositions/:id/sponsor', requireDelegation, support('sponsor'));
+propositionRoutes.post('/propositions/:id/sign', requireDelegation, support('signatory'));
 
 /** Step back from a role you took. */
-propositionRoutes.delete('/propositions/:id/support/:kind', requireTeam, (req, res) => {
+propositionRoutes.delete('/propositions/:id/support/:kind', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   const kind = req.params.kind === 'sponsor' ? 'sponsor'
     : req.params.kind === 'signatory' ? 'signatory' : null;

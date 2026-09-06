@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Stamp, formatDate } from './bits.jsx';
+import { Card, Stamp, formatDate } from './bits.jsx';
+import { CountryLink } from './CountryCard.jsx';
 
 const SORTS = {
   modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
@@ -9,7 +10,7 @@ const SORTS = {
 };
 
 /** Left panel: the committee's agenda, and the propositions filed under it. */
-export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewProposition, onNewProject, onOpenSettings }) {
+export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewProposition, onNewProject, onOpenSettings, canAct = true }) {
   const [sort, setSort] = useState('modified');
   const projects = board?.projects || [];
 
@@ -46,7 +47,7 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
               </div>
 
               {propositions.map((proposition) => (
-                <button
+                <Card
                   key={proposition.id}
                   className={[
                     'card',
@@ -61,7 +62,10 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                     <span className="card__name">{proposition.name}</span>
                   </div>
                   <div className="card__foot">
-                    <span className="card__country">{proposition.initiating_team.country_name}</span>
+                    <CountryLink
+                      name={proposition.initiating_team.country_name}
+                      className="card__country"
+                    />
                     <span className="spacer" />
                     {proposition.support.eligible && <span className="stamp stamp--eligible">20%</span>}
                     <Stamp status={proposition.status} />
@@ -75,12 +79,14 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                       <span>{formatDate(proposition.updated_at)}</span>
                     </div>
                   )}
-                </button>
+                </Card>
               ))}
 
-              <button className="btn btn--ghost btn--small" onClick={() => onNewProposition(project.id)}>
-                + New proposition
-              </button>
+              {canAct && (
+                <button className="btn btn--ghost btn--small" onClick={() => onNewProposition(project.id)}>
+                  + New proposition
+                </button>
+              )}
             </div>
           );
         })}
