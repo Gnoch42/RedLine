@@ -130,6 +130,24 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
     }
   };
 
+  /** Stand up from this delegation for good. */
+  const leaveSeat = async () => {
+    if (!window.confirm(
+      `Give up ${user.team.country_name}'s seat on ${user.committee.name}?`
+    )) return;
+    try {
+      const { outcome, user: next } = await api(`/teams/${user.team.id}/seat`, { method: 'DELETE' });
+      onUserChange(next);
+      say(outcome === 'released'
+        ? `Seat given up. ${user.team.country_name} is free for another delegation to register.`
+        : outcome === 'left_standing'
+          ? `You have left. The ${user.team.country_name} delegation stays on the record — it has taken positions that outlast you.`
+          : 'You have left the delegation.');
+    } catch (err) {
+      say(err.message, 'error');
+    }
+  };
+
   const reloadUser = useCallback(async () => {
     const { user: next } = await api('/auth/me');
     onUserChange(next);
@@ -307,6 +325,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
           initialTab={modal.tab}
           onClose={() => setModal(null)}
           onChanged={reloadUser}
+          onLeave={leaveSeat}
         />
       )}
 

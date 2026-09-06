@@ -1,13 +1,43 @@
 import { Router } from 'express';
 import { one, all, run, tx, uniqueCode } from '../db.js';
-import { conflict, denied, missing, int, str } from '../http.js';
+import { bad, conflict, denied, missing, int, str } from '../http.js';
 import {
   requireUser, requireCommittee, serializeUser, userFromToken, joinTeam, isSecretariat,
-  mayEnterCommittee,
+  mayEnterCommittee, sit,
 } from '../auth.js';
+
+/**
+ * A delegate represents one country, chosen on their account. A delegation is
+ * always registered under it, so there is nothing to get wrong here.
+ */
+function ownCountry(user) {
+  const country = (user.country || '').trim();
+  if (!country) {
+    throw bad('Your account has no country on it. Set one before registering a delegation.');
+  }
+  return country;
+}
 import { serializeProposition, refreshStatus } from '../model.js';
 
 export const orgRoutes = Router();
+
+/** Write a committee's roster rules: who may sit, and who may look in. */
+function setRoster(committeeId, body) {
+  run('UPDATE committees SET whitelist_enabled = ?, block_observers = ? WHERE id = ?',
+    body?.whitelist_enabled ? 1 : 0,
+    body?.whitelist_enabled && body?.block_observers ? 1 : 0,
+    committeeId);
+
+  if (!Array.isArray(body?.whitelist)) return;
+  const wanted = [...new Set(
+    body.whitelist.map((c) => (typeof c === 'string' ? c.trim() : '')).filter(Boolean)
+  )].slice(0, 400);
+  run('DELETE FROM committee_countries WHERE committee_id = ?', committeeId);
+  for (const country of wanted) {
+    run('INSERT OR IGNORE INTO committee_countries (committee_id, country_name) VALUES (?, ?)',
+      committeeId, country.slice(0, 120));
+  }
+}
 
 function assertMember(user, committeeId) {
   if (user.committee_id !== Number(committeeId)) {
@@ -24,7 +54,7 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
   const name = str(req.body, 'name', { max: 120 });
   const description = str(req.body, 'description', { required: false, max: 2000 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
-  const countryName = str(req.body, 'country_name', { max: 120 });
+  const countryName = ownCountry(req.user);
   const projects = Array.isArray(req.body?.projects) ? req.body.projects : [];
 
   const token = req.token;
@@ -43,6 +73,7 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
       committeeId, countryName, joinCode
     );
     joinTeam(req.user.id, Number(team.lastInsertRowid), token);
+    setRoster(committeeId, req.body);
 
     projects
       .map((p) => (typeof p === 'string' ? p.trim() : ''))
@@ -69,7 +100,8 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
  */
 orgRoutes.get('/committees', requireUser, (req, res) => {
   const committees = all(
-    `SELECT c.id, c.name, c.description, c.total_members, c.created_at, c.whitelist_enabled,
+    `SELECT c.id, c.name, c.description, c.total_members, c.created_at,
+            c.whitelist_enabled, c.block_observers,
             (SELECT COUNT(*) FROM teams t WHERE t.committee_id = c.id) AS registered_teams,
             (SELECT m.team_id FROM memberships m
                JOIN teams t2 ON t2.id = m.team_id
@@ -85,7 +117,15 @@ orgRoutes.get('/committees', requireUser, (req, res) => {
     committees: committees.map((c) => ({
       ...c,
       whitelist_enabled: !!c.whitelist_enabled,
+      block_observers: !!c.block_observers,
       may_enter: mayEnterCommittee(req.user, c.id),
+      // Whether this delegate's country could take the seat, as opposed to just
+      // looking in.
+      may_take_seat: !c.whitelist_enabled || !!one(
+        `SELECT 1 AS x FROM committee_countries
+          WHERE committee_id = ? AND lower(country_name) = lower(?)`,
+        c.id, req.user.country || ''
+      ),
       // What is already spoken for, so the country picker can rule it out.
       taken_countries: taken.filter((t) => t.committee_id === c.id).map((t) => t.country_name),
       seats_countries: c.whitelist_enabled
@@ -104,7 +144,7 @@ orgRoutes.post('/teams', requireUser, (req, res) => {
   if (isSecretariat(req.user)) {
     throw denied('The secretariat does not sit in a delegation — open any committee instead.');
   }
-  const countryName = str(req.body, 'country_name', { max: 120 });
+  const countryName = ownCountry(req.user);
 
   const cttee = req.body?.committee_id !== undefined
     ? one('SELECT * FROM committees WHERE id = ?', int(req.body, 'committee_id', { max: 1e9 }))
@@ -189,6 +229,7 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
       committee_code: cttee.committee_code,
       registered_teams: teams.length,
       whitelist_enabled: !!cttee.whitelist_enabled,
+      block_observers: !!cttee.block_observers,
     },
     whitelist: all(
       'SELECT country_name FROM committee_countries WHERE committee_id = ? ORDER BY country_name COLLATE NOCASE',
@@ -213,24 +254,11 @@ orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
   const name = str(req.body, 'name', { max: 120 });
   const description = str(req.body, 'description', { required: false, max: 2000 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
-  run(
-    `UPDATE committees SET name = ?, description = ?, total_members = ?, whitelist_enabled = ?
-      WHERE id = ?`,
-    name, description, totalMembers, req.body?.whitelist_enabled ? 1 : 0, req.user.committee_id
-  );
-
-  if (Array.isArray(req.body?.whitelist)) {
-    const wanted = [...new Set(
-      req.body.whitelist.map((c) => (typeof c === 'string' ? c.trim() : '')).filter(Boolean)
-    )].slice(0, 400);
-    tx(() => {
-      run('DELETE FROM committee_countries WHERE committee_id = ?', req.user.committee_id);
-      for (const country of wanted) {
-        run('INSERT OR IGNORE INTO committee_countries (committee_id, country_name) VALUES (?, ?)',
-          req.user.committee_id, country.slice(0, 120));
-      }
-    });
-  }
+  tx(() => {
+    run('UPDATE committees SET name = ?, description = ?, total_members = ? WHERE id = ?',
+      name, description, totalMembers, req.user.committee_id);
+    setRoster(req.user.committee_id, req.body);
+  });
   // The threshold moved under every proposition here, so some may have crossed
   // it — or fallen back below.
   for (const row of all(
@@ -410,4 +438,44 @@ orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
   }));
 
   res.json({ country: teams[0].country_name, delegations });
+});
+
+/**
+ * Give up a seat. The membership always goes; the delegation itself only goes
+ * with it when nobody else is in it and it has left nothing behind — a
+ * delegation that sponsors, signs or has proposed anything stays on the record,
+ * because those commitments were made by a country, not by whoever typed them.
+ */
+orgRoutes.delete('/teams/:id/seat', requireUser, (req, res) => {
+  const teamId = Number(req.params.id);
+  const team = one('SELECT * FROM teams WHERE id = ?', teamId);
+  if (!team) throw missing('No such delegation.');
+  if (!one('SELECT 1 AS x FROM memberships WHERE user_id = ? AND team_id = ?', req.user.id, teamId)) {
+    throw missing('You do not have a seat in that delegation.');
+  }
+
+  const outcome = tx(() => {
+    run('DELETE FROM memberships WHERE user_id = ? AND team_id = ?', req.user.id, teamId);
+
+    const others = one('SELECT COUNT(*) AS n FROM memberships WHERE team_id = ?', teamId).n;
+    if (others > 0) return 'left';
+
+    const committed = one(
+      `SELECT
+         (SELECT COUNT(*) FROM approvals WHERE team_id = ?) +
+         (SELECT COUNT(*) FROM amendments WHERE proposing_team_id = ?) +
+         (SELECT COUNT(*) FROM versions WHERE author_team_id = ?) AS n`,
+      teamId, teamId, teamId
+    ).n;
+    if (committed > 0) return 'left_standing';
+
+    run('DELETE FROM sponsor_requests WHERE team_id = ?', teamId);
+    run('DELETE FROM teams WHERE id = ?', teamId);
+    return 'released';
+  });
+
+  // Standing up from the chair you were sitting in puts you back in the lobby.
+  if (req.user.team_id === teamId) sit(req.token, {});
+
+  res.json({ outcome, user: serializeUser(userFromToken(req.token)) });
 });

@@ -15,16 +15,17 @@ export const isSecretariat = (user) => user?.role === 'secretariat';
 export const canDraft = (user) => user?.role === 'delegate';
 
 /**
- * May this person enter that committee at all? A committee with its whitelist
- * on seats only the countries on it, and lets only those countries look in —
- * except the secretariat, who are never shut out, and anyone already holding a
- * seat there.
+ * May this person look in on that committee? A whitelist on its own only
+ * governs who may take a seat; shutting observers out is a separate choice. The
+ * secretariat is never shut out, nor is anyone already holding a seat there.
  */
 export function mayEnterCommittee(user, committeeId) {
   if (isSecretariat(user)) return true;
-  const committee = one('SELECT whitelist_enabled FROM committees WHERE id = ?', committeeId);
+  const committee = one(
+    'SELECT whitelist_enabled, block_observers FROM committees WHERE id = ?', committeeId
+  );
   if (!committee) return false;
-  if (!committee.whitelist_enabled) return true;
+  if (!committee.whitelist_enabled || !committee.block_observers) return true;
 
   const seated = one(
     `SELECT 1 AS x FROM memberships m
@@ -96,7 +97,7 @@ export function userFromToken(token) {
             s.active_committee_id AS committee_id,
             t.country_name, t.join_code,
             c.name AS committee_name, c.description AS committee_description,
-            c.total_members, c.committee_code, c.whitelist_enabled
+            c.total_members, c.committee_code, c.whitelist_enabled, c.block_observers
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        LEFT JOIN teams t ON t.id = s.active_team_id
@@ -201,6 +202,7 @@ export function serializeUser(user) {
           total_members: user.total_members,
           committee_code: user.committee_code,
           whitelist_enabled: !!user.whitelist_enabled,
+          block_observers: !!user.block_observers,
         }
       : null,
     // Reading only: faculty, the secretariat, and anyone looking in on a

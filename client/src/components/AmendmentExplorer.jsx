@@ -2,27 +2,19 @@ import React, { useState } from 'react';
 import { Card, Stamp, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 
-const ORDER = { pending: 0, frozen: 1, draft: 2, adopted: 3, detached: 4, withdrawn: 5 };
-
-const SORTS = {
-  status: {
-    label: 'Status',
-    compare: (a, b) => (ORDER[a.status] - ORDER[b.status]) || b.updated_at.localeCompare(a.updated_at),
-  },
-  modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
-  approval: {
-    label: 'Approvals',
-    compare: (a, b) => b.approval.approved_count - a.approval.approved_count,
-  },
-  country: {
-    label: 'Proposing country',
-    compare: (a, b) => a.proposing_team.country_name.localeCompare(b.proposing_team.country_name),
-  },
-};
+const STATUSES = [
+  ['pending', 'Pending'],
+  ['frozen', 'Frozen'],
+  ['draft', 'Draft'],
+  ['adopted', 'Adopted'],
+  ['detached', 'Detached'],
+  ['withdrawn', 'Withdrawn'],
+];
+const byModified = (a, b) => b.updated_at.localeCompare(a.updated_at);
 
 /** Right panel: amendments filed against the proposition currently open. */
 export function AmendmentExplorer({ proposition, amendments, selectedId, onSelect, onNew, canPropose }) {
-  const [sort, setSort] = useState('status');
+  const [status, setStatus] = useState('all');
 
   if (!proposition) {
     return (
@@ -33,7 +25,12 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
     );
   }
 
-  const list = [...(amendments || [])].sort(SORTS[sort].compare);
+  const all = amendments || [];
+  const counts = {};
+  for (const amendment of all) counts[amendment.status] = (counts[amendment.status] || 0) + 1;
+  const list = all
+    .filter((a) => status === 'all' || a.status === status)
+    .sort(byModified);
 
   return (
     <section className="panel panel--right">
@@ -41,9 +38,14 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
         <h2>Amendments</h2>
         <div className="sub">to #{proposition.id} {proposition.name}</div>
         <div className="panel__toolbar">
-          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort amendments">
-            {Object.entries(SORTS).map(([key, { label }]) => (
-              <option key={key} value={key}>Sort: {label}</option>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            aria-label="Show amendments with this status"
+          >
+            <option value="all">All statuses ({all.length})</option>
+            {STATUSES.filter(([key]) => counts[key]).map(([key, label]) => (
+              <option key={key} value={key}>{label} ({counts[key]})</option>
             ))}
           </select>
         </div>
@@ -55,7 +57,11 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
       </div>
 
       <div className="panel__body">
-        {list.length === 0 && (
+        {list.length === 0 && all.length > 0 && (
+          <div className="panel__empty">Nothing here with that status.</div>
+        )}
+
+        {all.length === 0 && (
           <div className="panel__empty">
             Nothing filed yet.<br />
             {canPropose

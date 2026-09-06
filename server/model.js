@@ -333,6 +333,14 @@ export function serializeAmendment(amendment, prop, user, { includeContent = fal
       id: amendment.base_version_id,
       number: versionNumber(amendment.base_version_id),
     },
+    // Adoption writes a version whose parent is the one it was based on, so an
+    // adopted amendment can say which version it became.
+    resulting_version_number: amendment.status === 'adopted'
+      ? versionNumber(one(
+          'SELECT id FROM versions WHERE proposition_id = ? AND parent_version_id = ?',
+          amendment.proposition_id, amendment.base_version_id
+        )?.id)
+      : null,
     is_stale: amendment.base_version_id !== prop.current_version_id,
     is_own_team: mine,
     approval,

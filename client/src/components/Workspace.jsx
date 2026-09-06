@@ -359,7 +359,7 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
             </Sheet>
           </div>
           <div className="docs__col">
-            {amendment.is_stale && (
+            {amendment.status === 'frozen' && (
               <div className="frozen-banner">
                 <strong>This amendment is frozen.</strong>
                 The proposition has moved on since version {amendment.base_version.number} — it is
@@ -367,6 +367,26 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
                 automatically: {amendment.is_own_team
                   ? 'reapply it to the current version to put it back in front of the sponsors.'
                   : 'its authors must reapply it to the current version.'}
+              </div>
+            )}
+            {amendment.status === 'adopted' && (
+              <div className="adopted-banner">
+                <strong>This amendment was adopted.</strong>
+                Every sponsor approved it, and it became version{' '}
+                {amendment.resulting_version_number} of the proposition. The redline below is what
+                it changed, against version {amendment.base_version.number}.
+              </div>
+            )}
+            {amendment.status === 'detached' && (
+              <div className="adopted-banner">
+                <strong>This amendment was detached.</strong>
+                Its authors took it out and filed it as a proposition of its own rather than press
+                it here.
+              </div>
+            )}
+            {amendment.status === 'withdrawn' && (
+              <div className="frozen-banner">
+                <strong>This amendment was withdrawn</strong> by the delegation that proposed it.
               </div>
             )}
             <Sheet

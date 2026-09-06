@@ -3,6 +3,7 @@ import { api, setToken } from '../api.js';
 import { Wordmark } from './bits.jsx';
 import { CodeCard } from './CodeCard.jsx';
 import { CountrySelect } from './CountrySelect.jsx';
+import { WhitelistEditor } from './WhitelistEditor.jsx';
 
 const joinLink = (code) => `${window.location.origin}/?join=${encodeURIComponent(code)}`;
 
@@ -190,8 +191,6 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
   const [committees, setCommittees] = useState(null);
   const [filter, setFilter] = useState('');
   const [chosen, setChosen] = useState(null);
-  const [country, setCountry] = useState(me?.country || '');
-  const [changing, setChanging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -218,19 +217,13 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
       return;
     }
     setChosen(committee);
-    setChanging(false);
-    const taken = committee.taken_countries.map((c) => c.toLowerCase());
-    setCountry(taken.includes((me?.country || '').toLowerCase()) ? '' : (me?.country || ''));
   };
 
   const join = async () => {
     setBusy(true);
     setError(null);
     try {
-      const { user } = await api('/teams', {
-        method: 'POST',
-        body: { committee_id: chosen.id, country_name: country },
-      });
+      const { user } = await api('/teams', { method: 'POST', body: { committee_id: chosen.id } });
       onUser(user);
     } catch (err) {
       setError(err.message);
@@ -254,7 +247,9 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
   if (chosen) {
     const mine = (me?.country || '').trim();
     const taken = chosen.taken_countries.map((c) => c.toLowerCase());
-    const clash = mine && taken.includes(mine.toLowerCase());
+    const clash = taken.includes(mine.toLowerCase());
+    const barred = !chosen.may_take_seat;
+
     return (
       <>
         <div className="chosen">
@@ -265,40 +260,36 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
           </div>
         </div>
 
-        {clash && !changing && (
+        {clash && (
           <div className="notice" style={{ marginBottom: 12 }}>
-            {mine} already has a delegation on this committee. Ask them for their join code to
-            sit with them, or register under a different country here.
+            {mine} already has a delegation on this committee. Ask them for their join code to sit
+            with them, or look in without taking a seat.
+          </div>
+        )}
+        {barred && !clash && (
+          <div className="notice" style={{ marginBottom: 12 }}>
+            {chosen.name} seats only the countries on its list, and {mine} is not one of them. You
+            can still look in.
           </div>
         )}
 
-        {changing || !country ? (
-          <div className="field">
-            <span className="label">Register as</span>
-            <CountrySelect
-              value={country}
-              onChange={setCountry}
-              taken={chosen.taken_countries}
-            />
-          </div>
-        ) : (
+        {!clash && !barred && (
           <p className="lead" style={{ marginBottom: 14 }}>
-            You will be registered as <strong>{country}</strong>.{' '}
-            <button type="button" className="linky" onClick={() => setChanging(true)}>
-              Represent someone else
-            </button>
+            You will be registered as <strong>{mine}</strong>, the country on your account.
           </p>
         )}
 
         {error && <div className="notice" style={{ marginBottom: 12 }}>{error}</div>}
 
-        <button className="btn btn--primary btn--block" onClick={join} disabled={busy || !country.trim()}>
-          {busy ? 'Joining…' : `Take ${chosen.name}'s ${country || ''} seat`.replace(/\s+/g, ' ')}
-        </button>
+        {!clash && !barred && (
+          <button className="btn btn--primary btn--block" onClick={join} disabled={busy}>
+            {busy ? 'Joining…' : `Take ${chosen.name}'s ${mine} seat`}
+          </button>
+        )}
         {/* Not every country is seated on every committee, and watching one you
             are not on is ordinary. */}
         <button
-          className="btn btn--block"
+          className={`btn btn--block${clash || barred ? ' btn--primary' : ''}`}
           style={{ marginTop: 8 }}
           onClick={() => onOpenCommittee(chosen.id)}
           disabled={busy}
@@ -349,7 +340,10 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
 }
 
 function CreateCommittee({ me, onUser }) {
-  const [country, setCountry] = useState(me?.country || '');
+  const [restricted, setRestricted] = useState(false);
+  const [blockObservers, setBlockObservers] = useState(false);
+  const [whitelist, setWhitelist] = useState([]);
+  const [adding, setAdding] = useState('');
   const form = useSubmit(async (data) => {
     const { user } = await api('/committees', {
       method: 'POST',
@@ -357,7 +351,9 @@ function CreateCommittee({ me, onUser }) {
         name: data.get('name'),
         description: data.get('description'),
         total_members: Number(data.get('total_members')),
-        country_name: country,
+        whitelist_enabled: restricted,
+        block_observers: blockObservers,
+        whitelist,
         projects: String(data.get('projects') || '').split('\n').map((s) => s.trim()).filter(Boolean),
       },
     });
@@ -382,18 +378,29 @@ function CreateCommittee({ me, onUser }) {
           20% needed to present a proposition. You can correct it later.
         </span>
       </label>
-      <div className="field">
-        <span className="label">Your country</span>
-        <CountrySelect value={country} onChange={setCountry} />
-      </div>
       <label className="field">
         <span className="label">Agenda items</span>
         <textarea name="projects" rows="3" style={{ fontFamily: 'var(--sans)', fontSize: 14, minHeight: 80 }}
                   placeholder={'Climate finance\nDigital divide'} />
         <span className="hint">One per line. You can add more later.</span>
       </label>
+
+      <WhitelistEditor
+        enabled={restricted}
+        onEnabled={setRestricted}
+        blockObservers={blockObservers}
+        onBlockObservers={setBlockObservers}
+        list={whitelist}
+        onList={setWhitelist}
+        adding={adding}
+        onAdding={setAdding}
+      />
+
       {form.error && <div className="notice" style={{ marginBottom: 12 }}>{form.error}</div>}
-      <button className="btn btn--primary btn--block" disabled={form.busy || !country.trim()}>
+      <p className="lead" style={{ marginBottom: 10 }}>
+        You will hold the <strong>{me?.country}</strong> seat on it.
+      </p>
+      <button className="btn btn--primary btn--block" disabled={form.busy}>
         Open the committee
       </button>
     </form>

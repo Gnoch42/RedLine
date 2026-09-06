@@ -110,6 +110,12 @@ function migrate() {
   if (!columnsOf('committees').includes('whitelist_enabled')) {
     db.exec('ALTER TABLE committees ADD COLUMN whitelist_enabled INTEGER NOT NULL DEFAULT 0');
   }
+  if (!columnsOf('committees').includes('block_observers')) {
+    // A whitelist used to shut observers out on its own; that is now a separate
+    // choice, and an existing whitelist kept the behaviour it was set up with.
+    db.exec('ALTER TABLE committees ADD COLUMN block_observers INTEGER NOT NULL DEFAULT 0');
+    db.exec('UPDATE committees SET block_observers = 1 WHERE whitelist_enabled = 1');
+  }
 
   if (!columnsOf('approvals').includes('version_id')) {
     db.exec('ALTER TABLE approvals ADD COLUMN version_id INTEGER REFERENCES versions(id)');

@@ -65,12 +65,12 @@ REDLINE_URL=http://localhost:8080 npm run seed
 An account is a **person**: a name, an email, an optional phone or WhatsApp number, and
 what they are at the conference.
 
-- **Delegate** — represents a country. The country is chosen from a list (the 193 UN member
-  states, with observers grouped at the top and a free-text option for any observer not
-  listed), never typed, so no delegation ends up filed under a misspelling. It carries over
-  as the default every time they register a delegation, and can still be overridden: one
-  account holds as many seats as you like, which is the usual case when the same delegate
-  sits on several committees.
+- **Delegate** — represents a country. It is chosen from a list (the 193 UN member states,
+  with observers grouped at the top and a free-text option for any observer not listed),
+  never typed, so no delegation ends up filed under a misspelling. A delegate represents the
+  same country wherever they sit, so every delegation they register is under it; changing it
+  is done once, on the account. One account holds as many seats as you like, which is the
+  usual case when the same delegate sits on several committees.
 - **Faculty** — an accompanying teacher or advisor. They sit with their delegation, using
   its join code, and see everything it sees, private drafts included. Like the secretariat,
   they read the drafting floor without writing to it.
@@ -101,11 +101,22 @@ description, the seat count behind the 20% threshold, and the agenda itself — 
 name, country and phone under Committee → Delegations. There is no organiser account and no
 moderator; nothing in the app requires elevated privileges, by design.
 
-A committee that seats a fixed roster can turn on a **whitelist** of countries under
-Committee → Settings. With it in force, a country not on the list can neither register a
-delegation nor look in — its delegates and its faculty alike. The event secretariat is never
-shut out, and a delegation that registered before the list went up keeps the access it has,
-so nobody's work is stranded mid-conference; the settings screen names any such country.
+A committee that seats a fixed roster can turn on a **whitelist** of countries — when it is
+founded, or later under Committee → Settings. Two separate choices:
+
+- The **list itself** governs who may take a seat. A country not on it cannot register a
+  delegation. Looking in stays open to everyone.
+- **Closing the door as well** shuts out those countries entirely, their faculty included.
+
+The event secretariat is never shut out either way, and a delegation that registered before
+the list went up keeps its seat, so nobody's work is stranded mid-conference; the settings
+screen names any such country.
+
+**Giving up a seat.** A delegate can stand up from a delegation under Committee →
+Delegations. If others are still in it, only they leave. If they were the last and the
+delegation has taken no position — sponsored nothing, signed nothing, written nothing — the
+country is released and can be registered again. If it has, the delegation stays on the
+record without them: those commitments were made by a country, not by whoever typed them.
 
 ## The rules the app enforces
 
@@ -172,10 +183,13 @@ yourself.
 
 ## What the interface looks like
 
-Three panels: the committee's agenda and its propositions on the left, the document in
-the middle, the amendments to the open proposition on the right. Opening an amendment
-splits the middle in two — the version it answers beside the redline — and the ✕ in its
-corner closes it again, leaving the proposition on its own.
+Three panels: the committee's agenda and its propositions on the left, the document in the
+middle, the amendments to the open proposition on the right. Opening an amendment splits the
+middle in two — the version it answers beside the redline — and the ✕ in its corner closes it
+again, leaving the proposition on its own.
+
+Both explorers filter by status, with a count beside each one, and order what is left by when
+it last moved.
 
 Diffs are computed in the browser over the Markdown source and shown the way a redlined
 draft reads — struck text and inserted text in place. Every redline has a **Clean**
@@ -223,9 +237,15 @@ Places where the build spec was silent, or where the implementation makes a call
 - **Looking in on a committee takes no seat and grants no hands.** An observer reads what
   the room can read — private drafts excepted, since those belong to their sponsors — and
   writes nothing.
+- **A whitelist gates the roster, and shutting observers out is a second, separate switch.**
+  A committee with a fixed membership is the common case; a committee nobody may watch is
+  the rare one, and conflating them would make the common case heavy-handed.
 - **A whitelist gates entry, not discovery.** Committees stay visible in the directory,
-  marked as closed to you. Hiding their existence would make a conference harder to
-  navigate without making it any more private.
+  marked as closed to you. Hiding their existence would make a conference harder to navigate
+  without making it any more private.
+- **Explorers filter rather than sort.** "Show me the frozen ones" is the question people
+  actually have; ordering by anything other than what moved most recently was answering a
+  question nobody asked.
 - **The secretariat sees every committee, and everyone's contact details are visible to
   everyone.** Both follow from what the tool is for. A conference that needs either of them
   narrowed should say so before using this with minors' phone numbers in it.
@@ -291,8 +311,9 @@ GET    /api/countries/:name            who speaks for a country, on every commit
 POST   /api/committees                 create a committee and its first delegation
 PATCH  /api/committees/:id             { name, description, total_members,
                                          whitelist_enabled, whitelist: [country] }
-POST   /api/teams                      { committee_id | committee_code, country_name }
+POST   /api/teams                      { committee_id | committee_code } — under your country
 POST   /api/teams/join                 { join_code }
+DELETE /api/teams/:id/seat             give up a seat; releases the country if it is free
 GET    /api/committees/:id             delegations, delegates, codes
 GET    /api/committees/:id/board       agenda + propositions, in one poll
 GET    /api/committees/:id/projects

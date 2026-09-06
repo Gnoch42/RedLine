@@ -2,25 +2,29 @@ import React, { useState } from 'react';
 import { Card, Stamp, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 
-const firstSponsor = (p) => p.sponsors[0]?.country_name || '';
-// Furthest along first, so what is nearly presentable rises to the top.
-const PHASE = { ready: 0, collecting: 1, active: 2, draft: 3, withdrawn: 4 };
-
-const SORTS = {
-  modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
-  status: {
-    label: 'Status',
-    compare: (a, b) => (PHASE[a.status] - PHASE[b.status]) || (a.id - b.id),
-  },
-  sponsor: { label: 'Lead sponsor', compare: (a, b) => firstSponsor(a).localeCompare(firstSponsor(b)) },
-  support: { label: 'Support', compare: (a, b) => b.support.teams - a.support.teams },
-  number: { label: 'Number', compare: (a, b) => a.id - b.id },
-};
+// Filtering answers "show me only the ones that are…"; ordering is by when
+// they last moved.
+const STATUSES = [
+  ['draft', 'Draft'],
+  ['active', 'Open'],
+  ['collecting', 'Signing'],
+  ['ready', 'Ready'],
+  ['withdrawn', 'Withdrawn'],
+];
+const byModified = (a, b) => b.updated_at.localeCompare(a.updated_at);
 
 /** Left panel: the committee's agenda, and the propositions filed under it. */
 export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewProposition, onNewProject, onOpenSettings, canAct = true }) {
-  const [sort, setSort] = useState('modified');
+  const [status, setStatus] = useState('all');
   const projects = board?.projects || [];
+
+  const counts = {};
+  for (const project of projects) {
+    for (const proposition of project.propositions) {
+      counts[proposition.status] = (counts[proposition.status] || 0) + 1;
+    }
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <section className="panel panel--left">
@@ -28,9 +32,14 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
         <h2>{committee.name}</h2>
         <div className="sub">{committee.description || 'Agenda and propositions'}</div>
         <div className="panel__toolbar">
-          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort propositions">
-            {Object.entries(SORTS).map(([key, { label }]) => (
-              <option key={key} value={key}>Sort: {label}</option>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            aria-label="Show propositions with this status"
+          >
+            <option value="all">All statuses ({total})</option>
+            {STATUSES.filter(([key]) => counts[key]).map(([key, label]) => (
+              <option key={key} value={key}>{label} ({counts[key]})</option>
             ))}
           </select>
           <button className="btn btn--small" onClick={onNewProject} title="Add an agenda item">+ Item</button>
@@ -46,7 +55,10 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
         )}
 
         {projects.map((project) => {
-          const propositions = [...project.propositions].sort(SORTS[sort].compare);
+          const propositions = project.propositions
+            .filter((p) => status === 'all' || p.status === status)
+            .sort(byModified);
+          if (status !== 'all' && propositions.length === 0) return null;
           return (
             <div className="project" key={project.id}>
               <div className="project__head">

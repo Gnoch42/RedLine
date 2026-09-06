@@ -153,22 +153,21 @@ test('an account carries the country its delegate represents', async () => {
   const { user } = await api('/api/auth/me', { token });
   assert.equal(user.country, 'Holy See');
 
-  // It is a default, not a cage: the same delegate can speak for someone else
-  // on another committee.
+  // A delegate represents one country: the delegation is registered under the
+  // account's, whatever the request says.
   const { user: seated } = await api('/api/teams', {
     method: 'POST', token,
     body: { committee_code: s.committeeCode, country_name: 'Sovereign Order of Malta' },
   });
-  assert.equal(seated.team.country_name, 'Sovereign Order of Malta');
-  assert.equal(seated.country, 'Holy See');
+  assert.equal(seated.team.country_name, 'Holy See');
 
-  // And it can be corrected afterwards without touching the seats already held.
+  // Changing it is done on the account, and leaves seats already held alone.
   const { user: fixed } = await api('/api/auth/me', {
     method: 'PATCH', token, body: { delegate_name: 'Nadia Haddad', country: 'State of Palestine' },
   });
   assert.equal(fixed.country, 'State of Palestine');
   assert.equal(fixed.delegate_name, 'Nadia Haddad');
-  assert.equal(fixed.seats[0].country_name, 'Sovereign Order of Malta');
+  assert.equal(fixed.seats[0].country_name, 'Holy See');
 
   await api('/api/auth/register', {
     method: 'POST', body: { email: 'nocountry@example.org', delegate_name: 'Pat' }, expect: 400,
@@ -642,9 +641,9 @@ test('a delegation can look in on a committee it holds no seat on', async () => 
   assert.equal(home.team.country_name, 'Japan');
 });
 
-test('a whitelist decides who may sit or even look in', async () => {
+test('a whitelist decides who may sit, and separately who may look in', async () => {
   const listed = ['France', 'Brazil', 'Germany', 'Kenya', 'India', 'Japan', 'Australia',
-    'Sovereign Order of Malta'];
+    'Holy See'];
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
     body: {
@@ -657,18 +656,33 @@ test('a whitelist decides who may sit or even look in', async () => {
     token: s.france.token,
   });
   assert.equal(committee.whitelist_enabled, true);
+  assert.equal(committee.block_observers, false);
   assert.deepEqual(whitelist, [...listed].sort((a, b) => a.localeCompare(b)));
 
-  // A country not on the list cannot look in, nor register a delegation.
+  // On its own, the list governs seats and nothing else.
   const outsider = await register('outsider2@example.org', 'Tomas', 'Czechia');
-  const blocked = await api('/api/auth/switch', {
-    method: 'POST', token: outsider, body: { committee_id: s.committeeId }, expect: 403,
-  });
-  assert.match(blocked.error, /only the countries on its list/);
   await api('/api/teams', {
     method: 'POST', token: outsider,
     body: { committee_id: s.committeeId, country_name: 'Czechia' }, expect: 403,
   });
+  const { user: watching } = await api('/api/auth/switch', {
+    method: 'POST', token: outsider, body: { committee_id: s.committeeId },
+  });
+  assert.equal(watching.committee.id, s.committeeId);
+  assert.equal(watching.observing, true);
+
+  // Shutting observers out is a separate switch.
+  await api(`/api/committees/${s.committeeId}`, {
+    method: 'PATCH', token: s.france.token,
+    body: {
+      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      whitelist_enabled: true, block_observers: true, whitelist: listed,
+    },
+  });
+  const blocked = await api('/api/auth/switch', {
+    method: 'POST', token: outsider, body: { committee_id: s.committeeId }, expect: 403,
+  });
+  assert.match(blocked.error, /only the countries on its list/);
 
   // The secretariat is never shut out.
   const { user: staff } = await api('/api/auth/switch', {
@@ -688,6 +702,28 @@ test('a whitelist decides who may sit or even look in', async () => {
       name: 'UNDP', description: 'UN Development Programme', total_members: 20,
       whitelist_enabled: false, whitelist: listed,
     },
+  });
+});
+
+test('a committee can be founded with its roster already closed', async () => {
+  const token = await register('closed@example.org', 'Ingrid', 'Sweden');
+  const { user } = await api('/api/committees', {
+    method: 'POST', token,
+    body: {
+      name: 'ECOSOC', description: '', total_members: 12,
+      whitelist_enabled: true, block_observers: true, whitelist: ['Sweden', 'Norway'],
+    },
+  });
+  assert.equal(user.team.country_name, 'Sweden');
+  assert.equal(user.committee.whitelist_enabled, true);
+  assert.equal(user.committee.block_observers, true);
+
+  const { whitelist } = await api(`/api/committees/${user.committee.id}`, { token });
+  assert.deepEqual(whitelist, ['Norway', 'Sweden']);
+
+  const outsider = await register('outsider3@example.org', 'Hugo', 'Peru');
+  await api('/api/auth/switch', {
+    method: 'POST', token: outsider, body: { committee_id: user.committee.id }, expect: 403,
   });
 });
 
@@ -848,4 +884,39 @@ test('the committee and its agenda can be corrected after the fact', async () =>
   await api(`/api/projects/${project.id}`, { method: 'DELETE', token: s.kenya.token });
   const { projects } = await api(`/api/committees/${s.committeeId}/projects`, { token: s.kenya.token });
   assert.equal(projects.some((p) => p.id === project.id), false);
+});
+
+test('a delegate can give up a seat, and the country gets it back', async () => {
+  // A delegation that has done nothing releases the country when its last
+  // delegate stands up.
+  const token = await register('passing@example.org', 'Mei', 'China');
+  const { user } = await api('/api/teams', {
+    method: 'POST', token, body: { committee_id: s.committeeId },
+  });
+  const teamId = user.team.id;
+
+  const { committees: taken } = await api('/api/committees', { token });
+  assert.ok(taken.find((c) => c.id === s.committeeId).taken_countries.includes('China'));
+
+  const gone = await api(`/api/teams/${teamId}/seat`, { method: 'DELETE', token });
+  assert.equal(gone.outcome, 'released');
+  assert.equal(gone.user.seats.length, 0);
+  assert.equal(gone.user.committee, null);
+
+  const { committees: freed } = await api('/api/committees', { token });
+  assert.equal(freed.find((c) => c.id === s.committeeId).taken_countries.includes('China'), false);
+
+  // A delegation that has committed itself stays on the record.
+  const standing = await api(`/api/teams/${s.germany.teamId}/seat`, {
+    method: 'DELETE', token: s.germany.token,
+  });
+  assert.equal(standing.outcome, 'left_standing');
+  const { committees: still } = await api('/api/committees', { token });
+  assert.ok(still.find((c) => c.id === s.committeeId).taken_countries.includes('Germany'));
+
+  // And a seat with someone else still in it simply loses one delegate.
+  const left = await api(`/api/teams/${s.france.teamId}/seat`, {
+    method: 'DELETE', token: s.franceSecondDelegate,
+  });
+  assert.equal(left.outcome, 'left');
 });
