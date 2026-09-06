@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { Card, Stamp, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 
+const firstSponsor = (p) => p.sponsors[0]?.country_name || '';
+
 const SORTS = {
   modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
-  country: { label: 'Initiating country', compare: (a, b) => a.initiating_team.country_name.localeCompare(b.initiating_team.country_name) },
+  sponsor: { label: 'Lead sponsor', compare: (a, b) => firstSponsor(a).localeCompare(firstSponsor(b)) },
   support: { label: 'Support', compare: (a, b) => b.support.teams - a.support.teams },
   number: { label: 'Number', compare: (a, b) => a.id - b.id },
 };
@@ -52,8 +54,9 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                   className={[
                     'card',
                     proposition.id === selectedId ? 'card--selected' : '',
-                    proposition.is_own_team ? 'card--own' : '',
-                    proposition.status === 'adopted' ? 'card--adopted' : '',
+                    proposition.my_roles.sponsor ? 'card--own' : '',
+                    proposition.status === 'collecting' ? 'card--collecting' : '',
+                    proposition.status === 'ready' ? 'card--ready' : '',
                   ].filter(Boolean).join(' ')}
                   onClick={() => onSelect(proposition.id)}
                 >
@@ -62,10 +65,15 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                     <span className="card__name">{proposition.name}</span>
                   </div>
                   <div className="card__foot">
-                    <CountryLink
-                      name={proposition.initiating_team.country_name}
-                      className="card__country"
-                    />
+                    {proposition.sponsors.slice(0, 2).map((sponsor, index) => (
+                      <React.Fragment key={sponsor.team_id}>
+                        {index > 0 && <span>·</span>}
+                        <CountryLink name={sponsor.country_name} className="card__country" />
+                      </React.Fragment>
+                    ))}
+                    {proposition.sponsors.length > 2 && (
+                      <span>+{proposition.sponsors.length - 2}</span>
+                    )}
                     <span className="spacer" />
                     {proposition.support.eligible && <span className="stamp stamp--eligible">20%</span>}
                     <Stamp status={proposition.status} />
@@ -74,6 +82,9 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                     <div className="card__foot" style={{ marginTop: 3 }}>
                       <span>
                         v{proposition.version_count} · {proposition.support.teams}/{proposition.support.total_members} backing
+                        {proposition.readiness.sponsor_count > 1
+                          && proposition.status === 'active'
+                          && ` · ${proposition.readiness.ready_count}/${proposition.readiness.sponsor_count} settled`}
                       </span>
                       <span className="spacer" />
                       <span>{formatDate(proposition.updated_at)}</span>

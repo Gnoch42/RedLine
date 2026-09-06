@@ -129,11 +129,20 @@ const main = async () => {
   });
   await call(`/propositions/${proposition.id}/submit`, { method: 'PATCH', token: founder });
 
-  await call(`/propositions/${proposition.id}/sponsor`, { method: 'POST', token: founder });
-  await call(`/propositions/${proposition.id}/sponsor`, { method: 'POST', token: token('Brazil') });
-  for (const country of ['Germany', 'Kenya', 'Japan']) {
-    await call(`/propositions/${proposition.id}/sign`, { method: 'POST', token: token(country) });
-  }
+  // Sponsorship is by admission: Brazil asks, France lets them in.
+  await call(`/propositions/${proposition.id}/sponsor-request`, {
+    method: 'POST', token: token('Brazil'),
+    body: { message: 'We drafted operative clause 1 with you.' },
+  });
+  const { proposition: withRequest } = await call(`/propositions/${proposition.id}`, { token: founder });
+  await call(
+    `/propositions/${proposition.id}/sponsor-requests/${withRequest.sponsor_requests[0].id}/accept`,
+    { method: 'POST', token: founder }
+  );
+  // And Kenya is still waiting on an answer.
+  await call(`/propositions/${proposition.id}/sponsor-request`, {
+    method: 'POST', token: token('Kenya'), body: { message: 'Our clause 3 language, our name on it.' },
+  });
 
   // One amendment goes all the way through...
   const { amendment: adopted } = await call(`/propositions/${proposition.id}/amendments`, {
@@ -167,6 +176,35 @@ const main = async () => {
   });
   await call(`/amendments/${pending.id}/submit`, { method: 'PATCH', token: token('India') });
   await call(`/amendments/${pending.id}/approve`, { method: 'POST', token: founder });
+
+  // A second text, further along: closed by its sponsors and already signed
+  // past the 20% it needs to be presented.
+  const second = (await call(`/projects/${projects[1].id}/propositions`, {
+    method: 'POST', token: token('Japan'),
+    body: {
+      name: 'Resolution on universal connectivity',
+      content: `The Committee,\n\n*Recognising* that a third of humanity remains offline,\n\n1. **Urges** Member States to publish a national connectivity plan by 2028;\n2. **Establishes** a voluntary fund for last-mile infrastructure.`,
+    },
+  })).proposition;
+  await call(`/propositions/${second.id}/submit`, { method: 'PATCH', token: token('Japan') });
+
+  await call(`/propositions/${second.id}/sponsor-request`, { method: 'POST', token: token('Kenya') });
+  const { proposition: secondWithRequest } = await call(`/propositions/${second.id}`, {
+    token: token('Japan'),
+  });
+  await call(
+    `/propositions/${second.id}/sponsor-requests/${secondWithRequest.sponsor_requests[0].id}/accept`,
+    { method: 'POST', token: token('Japan') }
+  );
+
+  // Both sponsors call the text settled, which opens it for signatures.
+  await call(`/propositions/${second.id}/ready`, { method: 'POST', token: token('Japan') });
+  await call(`/propositions/${second.id}/ready`, { method: 'POST', token: token('Kenya') });
+  for (const country of ['Germany', 'India']) {
+    await call(`/propositions/${second.id}/sign`, {
+      method: 'POST', token: token(country), body: { undertaking: true },
+    });
+  }
 
   const line = (email, code, note) => `  ${email.padEnd(30)} ${code}   ${note}`;
   console.log(`\n${fr.committee.name} is ready. Sign in with an email and that delegation's code:\n`);

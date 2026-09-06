@@ -5,7 +5,7 @@ import { requireCommittee, requireDelegation } from '../auth.js';
 import {
   getProposition, getAmendment, assertPropositionVisible, assertAmendmentVisible,
   serializeAmendment, serializeProposition, amendmentApprovalState, adoptAmendment,
-  newVersion, recordApproval, assertOwnTeam, versionNumber,
+  newVersion, recordApproval, assertOwnTeam, versionNumber, clearReadiness, refreshStatus,
 } from '../model.js';
 
 
@@ -44,7 +44,11 @@ amendmentRoutes.get('/propositions/:id/amendments', requireCommittee, (req, res)
 amendmentRoutes.post('/propositions/:id/amendments', requireDelegation, (req, res) => {
   const prop = visibleProposition(req.params.id, req.user);
   if (prop.status !== 'active') {
-    throw conflict('Amendments can only be written against a live proposition.');
+    throw conflict(
+      prop.status === 'collecting' || prop.status === 'ready'
+        ? 'The sponsors have declared this text settled and it is collecting signatures. It has to be reopened before it can be amended.'
+        : 'Amendments can only be written against a live proposition.'
+    );
   }
   const name = str(req.body, 'name', { max: 200 });
   const content = str(req.body, 'content', { required: false, max: 200000 });
@@ -118,11 +122,18 @@ amendmentRoutes.patch('/amendments/:id/submit', requireDelegation, (req, res) =>
   if (amendment.status !== 'draft') throw conflict('This amendment has already been submitted.');
 
   const stale = amendment.base_version_id !== prop.current_version_id;
-  run(
-    `UPDATE amendments SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    stale ? 'frozen' : 'pending', amendment.id
-  );
+  tx(() => {
+    run(
+      `UPDATE amendments SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id = ?`,
+      stale ? 'frozen' : 'pending', amendment.id
+    );
+    if (!stale) {
+      // The text is in play again: no sponsor can still be calling it settled.
+      clearReadiness(prop.id);
+      refreshStatus(prop.id);
+    }
+  });
   res.json({
     amendment: serializeAmendment(getAmendment(amendment.id), prop, req.user, { includeContent: true }),
   });
@@ -160,6 +171,7 @@ amendmentRoutes.post('/amendments/:id/approve', requireDelegation, (req, res) =>
     return false;
   });
 
+  refreshStatus(prop.id);
   const after = getProposition(prop.id);
   res.json({
     adopted,
@@ -182,18 +194,20 @@ amendmentRoutes.post('/amendments/:id/detach', requireDelegation, (req, res) => 
 
   const newPropId = tx(() => {
     const info = run(
-      `INSERT INTO propositions
-         (project_id, name, status, initiating_team_id, author_user_id)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO propositions (project_id, name, status, author_user_id)
+       VALUES (?, ?, ?, ?)`,
       prop.project_id,
       amendment.name,
       // A draft was never public, so it stays private; anything already public
       // stays public.
       amendment.status === 'draft' ? 'draft' : 'active',
-      amendment.proposing_team_id,
       amendment.author_user_id
     );
     const propositionId = Number(info.lastInsertRowid);
+    // The delegation that wrote it carries it: its first and only sponsor.
+    recordApproval(
+      amendment.proposing_team_id, 'proposition', propositionId, 'sponsor', amendment.author_user_id
+    );
     newVersion({
       propositionId,
       content: amendment.markdown_content,
@@ -244,6 +258,8 @@ amendmentRoutes.post('/amendments/:id/reapply', requireDelegation, (req, res) =>
         WHERE id = ?`,
       content, prop.current_version_id, amendment.id
     );
+    clearReadiness(prop.id);
+    refreshStatus(prop.id);
   });
 
   res.json({

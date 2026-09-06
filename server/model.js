@@ -9,10 +9,8 @@ export const SUPPORT_THRESHOLD = 0.20; // §5.4
 
 export function getProposition(id) {
   const prop = one(
-    `SELECT p.*, t.country_name AS initiating_country, t.committee_id,
-            pr.name AS project_name, pr.committee_id AS project_committee_id
+    `SELECT p.*, pr.name AS project_name, pr.committee_id
        FROM propositions p
-       JOIN teams t    ON t.id = p.initiating_team_id
        JOIN projects pr ON pr.id = p.project_id
       WHERE p.id = ?`,
     id
@@ -60,14 +58,23 @@ export function versionsOf(propositionId) {
 
 /* -------------------------------------------------------------- visibility */
 
+/** Is this delegation one of the sponsors — the people the text belongs to? */
+export function isSponsor(propositionId, teamId) {
+  if (!teamId) return false;
+  return !!one(
+    `SELECT 1 AS x FROM approvals
+      WHERE target_type = 'proposition' AND target_id = ? AND kind = 'sponsor' AND team_id = ?`,
+    propositionId, teamId
+  );
+}
+
 /**
- * §5.1.2 / §5.2.2 — a draft is the delegation's own business: its delegates all
- * see and edit it, the rest of the committee cannot. Everything else is
- * committee-wide.
+ * §5.1.2 / §5.2.2 — a draft is its sponsors' own business, which at that stage
+ * means the one delegation that wrote it. Everything else is committee-wide.
  */
 export function assertPropositionVisible(prop, user) {
   if (prop.committee_id !== user.committee_id) throw missing('Proposition not found.');
-  if (prop.status === 'draft' && prop.initiating_team_id !== user.team_id) {
+  if (prop.status === 'draft' && !isSponsor(prop.id, user.team_id)) {
     throw missing('Proposition not found.');
   }
   return prop;
@@ -86,7 +93,7 @@ export function assertAmendmentVisible(amendment, user) {
 
 export function approvalsFor(targetType, targetId, kind) {
   return all(
-    `SELECT ap.team_id, ap.created_at, t.country_name
+    `SELECT ap.team_id, ap.created_at, ap.version_id, t.country_name
        FROM approvals ap
        JOIN teams t ON t.id = ap.team_id
       WHERE ap.target_type = ? AND ap.target_id = ? AND ap.kind = ?
@@ -95,7 +102,7 @@ export function approvalsFor(targetType, targetId, kind) {
   );
 }
 
-export function recordApproval(teamId, targetType, targetId, kind, userId) {
+export function recordApproval(teamId, targetType, targetId, kind, userId, versionId = null) {
   const existing = one(
     `SELECT id FROM approvals
       WHERE team_id = ? AND target_type = ? AND target_id = ? AND kind = ?`,
@@ -103,11 +110,77 @@ export function recordApproval(teamId, targetType, targetId, kind, userId) {
   );
   if (existing) return false;
   run(
-    `INSERT INTO approvals (team_id, target_type, target_id, kind, user_id)
-     VALUES (?, ?, ?, ?, ?)`,
-    teamId, targetType, targetId, kind, userId
+    `INSERT INTO approvals (team_id, target_type, target_id, kind, user_id, version_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    teamId, targetType, targetId, kind, userId, versionId
   );
   return true;
+}
+
+export function dropApproval(teamId, targetType, targetId, kind) {
+  run(
+    `DELETE FROM approvals
+      WHERE team_id = ? AND target_type = ? AND target_id = ? AND kind = ?`,
+    teamId, targetType, targetId, kind
+  );
+}
+
+export const READY = 'ready';
+
+/** The sponsors, and which of them consider the text settled. */
+export function readinessOf(prop) {
+  const sponsors = approvalsFor('proposition', prop.id, 'sponsor');
+  const declared = new Set(
+    approvalsFor('proposition', prop.id, 'ready').map((r) => r.team_id)
+  );
+  return {
+    sponsors: sponsors.map((s) => ({ ...s, ready: declared.has(s.team_id) })),
+    ready_count: sponsors.filter((s) => declared.has(s.team_id)).length,
+    sponsor_count: sponsors.length,
+    all_ready: sponsors.length > 0 && sponsors.every((s) => declared.has(s.team_id)),
+  };
+}
+
+/**
+ * A proposition moves itself: once every sponsor has declared the text settled
+ * it opens for signatures, and once enough of the committee is behind it, it is
+ * ready to present. Any sponsor taking their readiness back reopens it.
+ * Called after anything that could change one of those inputs.
+ */
+export function refreshStatus(propositionId) {
+  const prop = getProposition(propositionId);
+  if (!['active', 'collecting', 'ready'].includes(prop.status)) return prop;
+
+  const next = readinessOf(prop).all_ready
+    ? (supportOf(prop).eligible ? 'ready' : 'collecting')
+    : 'active';
+
+  if (next !== prop.status) {
+    run(
+      `UPDATE propositions SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id = ?`,
+      next, propositionId
+    );
+    return getProposition(propositionId);
+  }
+  return prop;
+}
+
+/** Nothing is settled while an amendment is still in front of the sponsors. */
+export function pendingAmendmentCount(propositionId) {
+  return one(
+    `SELECT COUNT(*) AS n FROM amendments WHERE proposition_id = ? AND status = 'pending'`,
+    propositionId
+  ).n;
+}
+
+/** The text may be about to change, so no sponsor can call it settled. */
+export function clearReadiness(propositionId) {
+  run(
+    `DELETE FROM approvals
+      WHERE target_type = 'proposition' AND target_id = ? AND kind = 'ready'`,
+    propositionId
+  );
 }
 
 /**
@@ -139,8 +212,14 @@ export function supportOf(prop) {
 /* ------------------------------------------------------------ serialization */
 
 export function serializeProposition(prop, user, { includeContent = false } = {}) {
-  const sponsors = approvalsFor('proposition', prop.id, 'sponsor');
-  const signatories = approvalsFor('proposition', prop.id, 'signatory');
+  const readiness = readinessOf(prop);
+  const sponsors = readiness.sponsors;
+  const signatories = approvalsFor('proposition', prop.id, 'signatory').map((s) => ({
+    ...s,
+    // A signature stands against the text it was given for.
+    version_number: s.version_id ? versionNumber(s.version_id) : null,
+    stale: !!s.version_id && s.version_id !== prop.current_version_id,
+  }));
   const versions = versionsOf(prop.id);
   const current = prop.current_version_id
     ? one('SELECT * FROM versions WHERE id = ?', prop.current_version_id)
@@ -164,8 +243,6 @@ export function serializeProposition(prop, user, { includeContent = false } = {}
     project_name: prop.project_name,
     name: prop.name,
     status: prop.status,
-    initiating_team: { id: prop.initiating_team_id, country_name: prop.initiating_country },
-    is_own_team: prop.initiating_team_id === user.team_id,
     created_at: prop.created_at,
     updated_at: prop.updated_at,
     version_count: versions.length,
@@ -180,9 +257,29 @@ export function serializeProposition(prop, user, { includeContent = false } = {}
       : null,
     sponsors,
     signatories,
+    readiness: {
+      ready_count: readiness.ready_count,
+      sponsor_count: readiness.sponsor_count,
+      all_ready: readiness.all_ready,
+      blocked_by_amendments: pendingAmendmentCount(prop.id),
+    },
+    sponsor_requests: all(
+      `SELECT sr.id, sr.team_id, sr.message, sr.created_at, t.country_name
+         FROM sponsor_requests sr
+         JOIN teams t ON t.id = sr.team_id
+        WHERE sr.proposition_id = ? AND sr.status = 'pending'
+        ORDER BY sr.created_at ASC`,
+      prop.id
+    ),
     my_roles: {
       sponsor: sponsors.some((s) => s.team_id === user.team_id),
       signatory: signatories.some((s) => s.team_id === user.team_id),
+      ready: sponsors.some((s) => s.team_id === user.team_id && s.ready),
+      requested: !!one(
+        `SELECT 1 AS x FROM sponsor_requests
+          WHERE proposition_id = ? AND team_id = ? AND status = 'pending'`,
+        prop.id, user.team_id ?? -1
+      ),
     },
     support: supportOf(prop),
     amendment_counts: {
@@ -273,6 +370,8 @@ export function newVersion({ propositionId, content, note, authorTeamId, parentV
  */
 export function adoptAmendment(amendment, prop) {
   const supersededVersionId = prop.current_version_id;
+  // The text just moved, so nobody's declaration that it was settled survives.
+  clearReadiness(prop.id);
   newVersion({
     propositionId: prop.id,
     content: amendment.markdown_content,
@@ -317,8 +416,16 @@ export function settlePendingAmendments(propositionId) {
 }
 
 export function assertOwnTeam(row, user, what = 'this') {
-  const owner = row.proposing_team_id ?? row.initiating_team_id;
-  if (owner !== user.team_id) throw denied(`Only ${what} author delegation can do that.`);
+  if (row.proposing_team_id !== user.team_id) {
+    throw denied(`Only ${what} author delegation can do that.`);
+  }
+}
+
+/** Acting on a proposition is for the delegations that carry it. */
+export function assertSponsor(prop, user) {
+  if (!isSponsor(prop.id, user.team_id)) {
+    throw denied('Only a sponsor of this proposition can do that.');
+  }
 }
 
 export { bad, conflict, denied, missing };

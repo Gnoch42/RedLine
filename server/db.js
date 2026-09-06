@@ -104,6 +104,24 @@ function migrate() {
                 ORDER BY m.id LIMIT 1)`);
   }
 
+  if (!columnsOf('approvals').includes('version_id')) {
+    db.exec('ALTER TABLE approvals ADD COLUMN version_id INTEGER REFERENCES versions(id)');
+    // Existing signatures were given against whatever stood at the time; the
+    // current version is the closest honest answer.
+    db.exec(`UPDATE approvals SET version_id = (
+               SELECT p.current_version_id FROM propositions p WHERE p.id = approvals.target_id)
+              WHERE target_type = 'proposition' AND kind = 'signatory'`);
+  }
+
+  // Sponsorship became joint and equal: the delegation that started a
+  // proposition is now simply the first of its sponsors, with no standing of
+  // its own.
+  if (columnsOf('propositions').includes('initiating_team_id')) {
+    db.exec(`INSERT OR IGNORE INTO approvals (team_id, target_type, target_id, kind)
+             SELECT initiating_team_id, 'proposition', id, 'sponsor' FROM propositions`);
+    db.exec('ALTER TABLE propositions DROP COLUMN initiating_team_id');
+  }
+
   // Propositions and amendments are titled, not described.
   for (const table of ['propositions', 'amendments']) {
     if (columnsOf(table).includes('short_description')) {

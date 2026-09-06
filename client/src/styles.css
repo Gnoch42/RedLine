@@ -122,8 +122,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
   line-height: 1.5;
   white-space: nowrap;
 }
-.stamp--draft    { color: var(--ink-3); }
-.stamp--active   { color: var(--ink); }
+.stamp--draft      { color: var(--ink-3); }
+.stamp--active     { color: var(--ink); }
+.stamp--collecting { color: #7a5a12; background: #f6efdc; }
+.stamp--ready      { color: var(--insert); background: var(--insert-soft); }
 .stamp--pending  { color: var(--ink); }
 .stamp--adopted  { color: var(--insert); background: var(--insert-soft); }
 .stamp--frozen   { color: var(--frost); background: var(--frost-soft); }
@@ -268,6 +270,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .card--own { border-left-color: var(--ink); }
 .card--frozen { border-left-color: var(--frost); }
 .card--adopted { border-left-color: var(--insert); }
+.card--collecting { border-left-color: #b98f2c; }
+.card--ready { border-left-color: var(--insert); }
 
 .card__top { display: flex; align-items: baseline; gap: 6px; }
 .card__number {
@@ -357,6 +361,51 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .infobar__meta { margin-top: 3px; font-size: 12px; color: var(--ink-2); }
 .infobar__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* Delegations asking to be let in as sponsors. */
+.requests {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  max-width: 560px;
+}
+.request { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.request__note { color: var(--ink-3); font-style: italic; }
+.request .spacer { flex: 1; }
+
+/* The undertaking a signature is given under. */
+.undertaking {
+  border: 1px solid var(--redline);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--redline-soft);
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #61201b;
+}
+.undertaking strong { font-weight: 700; }
+.signature-check {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-top: 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.signature-check input { margin-top: 2px; }
+.signature-text {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper-edge);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.stale-note { color: var(--redline); font-size: 11px; }
 
 /* The ✕ that dismisses the amendment beside a proposition. */
 .closer {

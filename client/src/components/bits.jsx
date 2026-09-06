@@ -24,9 +24,33 @@ export function Card({ className, onClick, children }) {
   );
 }
 
+// A proposition's phase, in the words that fit on a stamp.
+const STATUS_LABEL = {
+  draft: 'draft',
+  active: 'open',
+  collecting: 'signing',
+  ready: 'ready',
+  withdrawn: 'withdrawn',
+};
+
 export function Stamp({ status }) {
   if (!status) return null;
-  return <span className={`stamp stamp--${status}`}>{status}</span>;
+  return <span className={`stamp stamp--${status}`}>{STATUS_LABEL[status] || status}</span>;
+}
+
+/** How far along the sponsors are in calling the text final. */
+export function ReadinessLine({ readiness, sponsors }) {
+  if (readiness.sponsor_count === 0) return null;
+  const waiting = sponsors.filter((s) => !s.ready).map((s) => s.country_name);
+  return (
+    <div className="tally__head" style={{ marginTop: 6 }}>
+      <strong>{readiness.ready_count}/{readiness.sponsor_count}</strong>
+      <span>
+        sponsors call the text settled
+        {waiting.length > 0 && ` — waiting on ${waiting.join(', ')}`}
+      </span>
+    </div>
+  );
 }
 
 export function formatDate(iso) {

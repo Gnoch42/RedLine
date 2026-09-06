@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Stamp, SupportMeter, ApprovalTally, Blank, formatDate } from './bits.jsx';
+import { Stamp, SupportMeter, ApprovalTally, ReadinessLine, Blank, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 import { Sheet, MarkdownBody, DiffBody, DiffSummary } from './DocumentSheet.jsx';
 
@@ -42,8 +42,36 @@ function SupportList({ label, teams }) {
             <React.Fragment key={team.team_id}>
               {index > 0 && ', '}
               <CountryLink name={team.country_name} />
+              {team.stale && (
+                <span className="stale-note" title={`signed version ${team.version_number}`}>
+                  {' '}(v{team.version_number})
+                </span>
+              )}
             </React.Fragment>
           ))}
+    </div>
+  );
+}
+
+/** Delegations waiting for the sponsors to let them in. */
+function SponsorRequests({ requests, on }) {
+  if (requests.length === 0) return null;
+  return (
+    <div className="requests">
+      <span className="label">Asking to sponsor</span>
+      {requests.map((request) => (
+        <div className="request" key={request.id}>
+          <CountryLink name={request.country_name} />
+          {request.message && <span className="request__note">“{request.message}”</span>}
+          <span className="spacer" />
+          <button className="btn btn--small btn--primary" onClick={() => on.acceptSponsor(request.id)}>
+            Admit
+          </button>
+          <button className="btn btn--small" onClick={() => on.declineSponsor(request.id)}>
+            Decline
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -71,28 +99,30 @@ function VersionPicker({ versions, value, onChange, allowCurrent = true, label =
 /* ------------------------------------------------------------ info panes */
 
 function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
-  const own = proposition.is_own_team;
-  const draft = proposition.status === 'draft';
-  const live = proposition.status === 'active';
+  const mine = proposition.my_roles;
+  const { status, readiness } = proposition;
+  const draft = status === 'draft';
+  const open = status === 'active';
+  const signing = status === 'collecting' || status === 'ready';
+  const soleSponsor = mine.sponsor && proposition.sponsors.length === 1;
 
   return (
     <div className="infobar__pane">
       <div className="infobar__title">
         <h1>{proposition.name}</h1>
-        <Stamp status={proposition.status} />
-        {own && <span className="label">your delegation</span>}
+        <Stamp status={status} />
+        {mine.sponsor && <span className="label">you sponsor this</span>}
       </div>
       <div className="infobar__meta">
-        #{proposition.id} · {proposition.project_name} · initiated by{' '}
-        <CountryLink name={proposition.initiating_team.country_name} /> · version{' '}
+        #{proposition.id} · {proposition.project_name} · version{' '}
         {proposition.current_version?.number} of {proposition.version_count} · updated{' '}
         {formatDate(proposition.updated_at)}
       </div>
 
       {draft ? (
         <div className="notice" style={{ marginTop: 10, maxWidth: 520 }}>
-          A draft of your delegation. Your fellow delegates can read and revise it; the rest of the
-          committee cannot see it until you submit it.
+          A draft of your delegation. Your fellow delegates can read and revise it; the rest of
+          the committee cannot see it until you submit it.
         </div>
       ) : (
         <>
@@ -101,6 +131,14 @@ function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
             <SupportList label="Signatories" teams={proposition.signatories} />
           </div>
           <SupportMeter support={proposition.support} />
+          {open && <ReadinessLine readiness={readiness} sponsors={proposition.sponsors} />}
+          {signing && (
+            <div className="tally__head" style={{ marginTop: 6 }}>
+              {status === 'ready'
+                ? 'Enough of the committee is behind it. Signatures are still open.'
+                : 'The sponsors have called the text final. It is collecting signatures.'}
+            </div>
+          )}
         </>
       )}
 
@@ -112,35 +150,66 @@ function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
       )}
 
       <div className="infobar__actions">
-        {canAct && draft && own && (
+        {canAct && draft && mine.sponsor && (
           <>
             <button className="btn" onClick={on.editProposition}>Edit draft</button>
             <button className="btn btn--redline" onClick={on.submitProposition}>Submit to committee</button>
           </>
         )}
-        {canAct && live && (
-          <>
-            <button
-              className={proposition.my_roles.sponsor ? 'btn' : 'btn btn--primary'}
-              onClick={proposition.my_roles.sponsor ? on.unsponsor : on.sponsor}
-            >
-              {proposition.my_roles.sponsor ? 'Sponsoring ✓ — stand down' : 'Become a sponsor'}
-            </button>
-            <button
-              className="btn"
-              onClick={proposition.my_roles.signatory ? on.unsign : on.sign}
-            >
-              {proposition.my_roles.signatory ? 'Signatory ✓ — withdraw' : 'Sign as signatory'}
-            </button>
-            {!hasAmendmentOpen && (
-              <button className="btn" onClick={on.newAmendment}>Propose an amendment</button>
-            )}
-          </>
+
+        {canAct && open && !hasAmendmentOpen && (
+          <button className="btn" onClick={on.newAmendment}>Propose an amendment</button>
         )}
-        {canAct && own && proposition.status !== 'withdrawn' && (
+
+        {/* Sponsorship: asked for, granted by the sponsors. */}
+        {canAct && !mine.sponsor && !draft && status !== 'withdrawn' && (
+          mine.requested
+            ? <button className="btn" onClick={on.cancelSponsorRequest}>Asked to sponsor — cancel</button>
+            : <button className="btn" onClick={on.askToSponsor}>Ask to sponsor</button>
+        )}
+
+        {/* Readiness: only meaningful while the text is still open. */}
+        {canAct && mine.sponsor && (open || signing) && (
+          mine.ready
+            ? (
+              <button className="btn" onClick={on.unready} title="Reopens the text to amendment">
+                Text settled ✓ — take it back
+              </button>
+            )
+            : (
+              <button
+                className="btn btn--primary"
+                onClick={on.declareReady}
+                disabled={readiness.blocked_by_amendments > 0}
+                title={readiness.blocked_by_amendments > 0
+                  ? `${readiness.blocked_by_amendments} amendment(s) still in front of the sponsors`
+                  : 'Ready to collect signatories'}
+              >
+                Ready to collect signatories
+              </button>
+            )
+        )}
+
+        {/* Signing: only on a settled text, and never by a sponsor. */}
+        {canAct && signing && !mine.sponsor && (
+          mine.signatory
+            ? <button className="btn" onClick={on.unsign}>Signed ✓ — withdraw signature</button>
+            : <button className="btn btn--redline" onClick={on.sign}>Sign this proposition</button>
+        )}
+
+        {canAct && mine.sponsor && !soleSponsor && (
+          <button className="btn btn--ghost btn--small" onClick={on.standDown}>
+            Stand down as sponsor
+          </button>
+        )}
+        {canAct && soleSponsor && status !== 'withdrawn' && (
           <button className="btn btn--ghost btn--small" onClick={on.withdrawProposition}>Withdraw</button>
         )}
       </div>
+
+      {canAct && mine.sponsor && (
+        <SponsorRequests requests={proposition.sponsor_requests} on={on} />
+      )}
     </div>
   );
 }

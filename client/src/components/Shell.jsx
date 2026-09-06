@@ -8,6 +8,7 @@ import { AmendmentExplorer } from './AmendmentExplorer.jsx';
 import { Workspace } from './Workspace.jsx';
 import { PropositionEditor, AmendmentEditor, ProjectForm } from './editors.jsx';
 import { CountryProvider } from './CountryCard.jsx';
+import { SignatureModal } from './SignatureModal.jsx';
 
 /**
  * Move between the committees this delegate sits on, or go and join another.
@@ -136,18 +137,42 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
       if (!window.confirm('Withdraw this proposition from the committee?')) return;
       act(() => api(`/propositions/${proposition.id}/withdraw`, { method: 'POST' }), 'Withdrawn.');
     },
-    sponsor: () => act(
-      () => api(`/propositions/${proposition.id}/sponsor`, { method: 'POST' }),
-      'You are now a sponsor. Amendments to this text will need your approval.'
+    askToSponsor: () => act(
+      () => api(`/propositions/${proposition.id}/sponsor-request`, { method: 'POST' }),
+      'Asked. One of the sponsors has to admit you.'
     ),
-    unsponsor: () => act(
-      () => api(`/propositions/${proposition.id}/support/sponsor`, { method: 'DELETE' }),
-      'You are no longer a sponsor.'
+    cancelSponsorRequest: () => act(
+      () => api(`/propositions/${proposition.id}/sponsor-request`, { method: 'DELETE' }),
+      'Request withdrawn.'
     ),
-    sign: () => act(
-      () => api(`/propositions/${proposition.id}/sign`, { method: 'POST' }),
-      'Signed as a signatory.'
+    acceptSponsor: (requestId) => act(
+      () => api(`/propositions/${proposition.id}/sponsor-requests/${requestId}/accept`, { method: 'POST' }),
+      (res) => `Admitted. ${res.proposition.sponsors.length} delegations now carry this text.`
     ),
+    declineSponsor: (requestId) => act(
+      () => api(`/propositions/${proposition.id}/sponsor-requests/${requestId}/decline`, { method: 'POST' }),
+      'Request declined.'
+    ),
+    standDown: () => {
+      if (!window.confirm('Stop sponsoring this proposition? You will no longer be asked to approve amendments to it.')) return;
+      act(
+        () => api(`/propositions/${proposition.id}/support/sponsor`, { method: 'DELETE' }),
+        'You no longer sponsor this proposition.'
+      );
+    },
+    declareReady: () => act(
+      () => api(`/propositions/${proposition.id}/ready`, { method: 'POST' }),
+      (res) => res.proposition.status === 'active'
+        ? `Noted. ${res.proposition.readiness.ready_count} of ${res.proposition.readiness.sponsor_count} sponsors call the text settled.`
+        : res.proposition.status === 'ready'
+          ? 'The text is closed and already has the support to be presented.'
+          : 'The text is closed. Signatures are open.'
+    ),
+    unready: () => act(
+      () => api(`/propositions/${proposition.id}/ready`, { method: 'DELETE' }),
+      'Taken back — the text is open to amendment again.'
+    ),
+    sign: () => setModal({ type: 'sign' }),
     unsign: () => act(
       () => api(`/propositions/${proposition.id}/support/signatory`, { method: 'DELETE' }),
       'Signature withdrawn.'
@@ -242,6 +267,25 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
       </div>
 
       <Toast toast={toast} />
+
+      {modal?.type === 'sign' && proposition && (
+        <SignatureModal
+          proposition={proposition}
+          country={user.team?.country_name}
+          onClose={() => setModal(null)}
+          onSign={async () => {
+            await act(
+              () => api(`/propositions/${proposition.id}/sign`, {
+                method: 'POST', body: { undertaking: true },
+              }),
+              (res) => res.proposition.status === 'ready'
+                ? 'Signed. The proposition now has the support to be presented.'
+                : 'Signed. Your delegation is on the record.'
+            );
+            setModal(null);
+          }}
+        />
+      )}
 
       {modal?.type === 'committee' && (
         <CommitteeModal

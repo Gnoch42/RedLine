@@ -4,7 +4,7 @@ import { conflict, denied, missing, int, str } from '../http.js';
 import {
   requireUser, requireCommittee, serializeUser, userFromToken, joinTeam, isSecretariat,
 } from '../auth.js';
-import { serializeProposition } from '../model.js';
+import { serializeProposition, refreshStatus } from '../model.js';
 
 export const orgRoutes = Router();
 
@@ -190,6 +190,13 @@ orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
     'UPDATE committees SET name = ?, description = ?, total_members = ? WHERE id = ?',
     name, description, totalMembers, req.user.committee_id
   );
+  // The threshold moved under every proposition here, so some may have crossed
+  // it — or fallen back below.
+  for (const row of all(
+    `SELECT p.id FROM propositions p
+       JOIN projects pr ON pr.id = p.project_id
+      WHERE pr.committee_id = ?`, req.user.committee_id
+  )) refreshStatus(row.id);
   res.json({ user: serializeUser(userFromToken(req.token)) });
 });
 
@@ -283,15 +290,16 @@ orgRoutes.get('/committees/:id/board', requireCommittee, (req, res) => {
     req.user.committee_id
   );
   const rows = all(
-    `SELECT p.*, t.country_name AS initiating_country, t.committee_id,
-            pr.name AS project_name
+    `SELECT p.*, pr.name AS project_name, pr.committee_id
        FROM propositions p
-       JOIN teams t     ON t.id = p.initiating_team_id
        JOIN projects pr ON pr.id = p.project_id
       WHERE pr.committee_id = ?
-        AND (p.status <> 'draft' OR p.initiating_team_id = ?)
+        AND (p.status <> 'draft' OR EXISTS (
+              SELECT 1 FROM approvals a
+               WHERE a.target_type = 'proposition' AND a.target_id = p.id
+                 AND a.kind = 'sponsor' AND a.team_id = ?))
       ORDER BY p.id ASC`,
-    req.user.committee_id, req.user.team_id
+    req.user.committee_id, req.user.team_id ?? -1
   );
   const byProject = new Map(projects.map((p) => [p.id, []]));
   for (const row of rows) {
@@ -335,12 +343,13 @@ orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
         ORDER BY CASE u.role WHEN 'delegate' THEN 0 ELSE 1 END, u.delegate_name`,
       team.team_id
     ),
-    // What this delegation has put on the table in that committee.
+    // What this delegation sponsors in that committee.
     propositions: all(
       `SELECT p.id, p.name, p.status
          FROM propositions p
-         JOIN projects pr ON pr.id = p.project_id
-        WHERE p.initiating_team_id = ? AND p.status <> 'draft'
+         JOIN approvals a ON a.target_type = 'proposition' AND a.target_id = p.id
+                         AND a.kind = 'sponsor' AND a.team_id = ?
+        WHERE p.status <> 'draft'
         ORDER BY p.id ASC`,
       team.team_id
     ),

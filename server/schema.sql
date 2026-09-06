@@ -80,19 +80,39 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+-- A proposition belongs to its sponsors, jointly and equally. There is no
+-- author-owner: the delegation that types it is simply its first sponsor.
 CREATE TABLE IF NOT EXISTS propositions (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name               TEXT    NOT NULL,
-  -- draft | active | adopted | withdrawn
+  -- draft      private to its sponsors
+  -- active     public, open to amendment and to new sponsors
+  -- collecting every sponsor has declared the text settled; signatures are open
+  -- ready      enough of the committee is behind it to present it
+  -- withdrawn  taken off the table by its last remaining sponsor
   status             TEXT    NOT NULL DEFAULT 'draft',
-  initiating_team_id INTEGER NOT NULL REFERENCES teams(id),
-  -- Drafts are visible to the whole delegation; the author is kept for
-  -- attribution, not for access control.
+  -- Kept for attribution only; it confers nothing.
   author_user_id     INTEGER NOT NULL REFERENCES users(id),
   current_version_id INTEGER REFERENCES versions(id),
   created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- Sponsorship is by admission: a delegation asks, and a delegation already
+-- sponsoring lets them in. Nobody joins the sponsors unilaterally.
+CREATE TABLE IF NOT EXISTS sponsor_requests (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  proposition_id     INTEGER NOT NULL REFERENCES propositions(id) ON DELETE CASCADE,
+  team_id            INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  message            TEXT    NOT NULL DEFAULT '',
+  -- pending | accepted | declined
+  status             TEXT    NOT NULL DEFAULT 'pending',
+  decided_by_team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+  created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  decided_at         TEXT,
+  UNIQUE (proposition_id, team_id)
 );
 
 -- Immutable content snapshot. parent_version_id chains backwards to version 1.
@@ -130,14 +150,21 @@ CREATE TABLE IF NOT EXISTS amendment_cosponsors (
   PRIMARY KEY (amendment_id, team_id)
 );
 
--- A team's support for a proposition or an amendment.
+-- A team's standing on a proposition or an amendment.
+--   sponsor            jointly responsible for the text
+--   ready              this sponsor considers the text settled (§5.4a)
+--   signatory          undertakes to sign it as it stands
+--   amendment_approval this sponsor accepts an amendment to it
 CREATE TABLE IF NOT EXISTS approvals (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   team_id     INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   target_type TEXT    NOT NULL,  -- 'proposition' | 'amendment'
   target_id   INTEGER NOT NULL,
-  kind        TEXT    NOT NULL,  -- 'sponsor' | 'signatory' | 'amendment_approval'
+  kind        TEXT    NOT NULL,
   user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- The version a signature was given against, so a signature can be shown for
+  -- what it is if the sponsors later reopen the text.
+  version_id  INTEGER REFERENCES versions(id) ON DELETE SET NULL,
   created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE (team_id, target_type, target_id, kind)
 );
@@ -146,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_versions_prop     ON versions (proposition_id, id
 CREATE INDEX IF NOT EXISTS idx_amendments_prop   ON amendments (proposition_id);
 CREATE INDEX IF NOT EXISTS idx_approvals_target  ON approvals (target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_propositions_proj ON propositions (project_id);
+CREATE INDEX IF NOT EXISTS idx_sponsor_requests   ON sponsor_requests (proposition_id, status);
 CREATE INDEX IF NOT EXISTS idx_projects_cttee    ON projects (committee_id);
 CREATE INDEX IF NOT EXISTS idx_teams_cttee       ON teams (committee_id);
 -- Also constrains databases migrated from a build without the column.

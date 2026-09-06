@@ -23,6 +23,21 @@ async function register(email, name, country = 'France', extra = {}) {
   return token;
 }
 
+/** Ask to sponsor, and have an existing sponsor let you in. */
+async function admitSponsor(propId, joinerToken, sponsorToken) {
+  const asked = await api(`/api/propositions/${propId}/sponsor-request`, {
+    method: 'POST', token: joinerToken,
+  });
+  const mine = asked.proposition.my_roles;
+  assert.equal(mine.requested, true);
+
+  const { proposition } = await api(`/api/propositions/${propId}`, { token: sponsorToken });
+  const request = proposition.sponsor_requests.at(-1);
+  return api(`/api/propositions/${propId}/sponsor-requests/${request.id}/accept`, {
+    method: 'POST', token: sponsorToken,
+  });
+}
+
 async function delegation(email, name, country) {
   const token = await register(email, name, country);
   const { user } = await api('/api/teams', {
@@ -94,6 +109,7 @@ test('other countries register their own delegations in that committee', async (
   s.brazil = await delegation('ana@example.org', 'Ana', 'Brazil');
   s.kenya = await delegation('wanjiru@example.org', 'Wanjiru', 'Kenya');
   s.india = await delegation('ravi@example.org', 'Ravi', 'India');
+  s.japan = await delegation('aiko@example.org', 'Aiko', 'Japan');
 
   // The committee code still works for anyone who prefers to hand one out.
   const dup = await api('/api/teams', {
@@ -196,6 +212,9 @@ test('a draft proposition is the delegation\'s alone, then public once submitted
   s.propId = proposition.id;
   assert.equal(proposition.status, 'draft');
   assert.equal(proposition.current_version.number, 1);
+  // Writing it makes you its first sponsor, not its owner.
+  assert.deepEqual(proposition.sponsors.map((x) => x.country_name), ['France']);
+  assert.equal(proposition.my_roles.sponsor, true);
 
   // Invisible to another delegation...
   const others = await api(`/api/projects/${s.projectId}/propositions`, { token: s.germany.token });
@@ -235,31 +254,63 @@ test('drafts can be revised in place; live propositions cannot', async () => {
   s.kenyaDraftId = proposition.id;
 });
 
-test('the 20% threshold counts distinct delegations, not roles', async () => {
-  const sponsor = (token) => api(`/api/propositions/${s.propId}/sponsor`, { method: 'POST', token });
-  const sign = (token) => api(`/api/propositions/${s.propId}/sign`, { method: 'POST', token });
+test('sponsorship is by admission, and the sponsors carry it jointly', async () => {
+  // Nobody joins the sponsors unilaterally.
+  const asked = await api(`/api/propositions/${s.propId}/sponsor-request`, {
+    method: 'POST', token: s.brazil.token, body: { message: 'We drafted clause 2 with you.' },
+  });
+  assert.equal(asked.proposition.sponsors.length, 1);
+  assert.equal(asked.proposition.sponsor_requests.length, 1);
+  assert.equal(asked.proposition.sponsor_requests[0].country_name, 'Brazil');
 
-  let r = await sponsor(s.france.token);
-  assert.equal(r.proposition.support.teams, 1);
+  // Only a sponsor can decide on it.
+  const outsider = await api(
+    `/api/propositions/${s.propId}/sponsor-requests/${asked.proposition.sponsor_requests[0].id}/accept`,
+    { method: 'POST', token: s.kenya.token, expect: 403 }
+  );
+  assert.match(outsider.error, /sponsor of this proposition/);
 
-  // Brazil takes both roles — one delegation, counted once.
-  await sponsor(s.brazil.token);
-  r = await sign(s.brazil.token);
-  assert.equal(r.proposition.support.teams, 2);
-  assert.equal(r.proposition.sponsors.length, 2);
-  assert.equal(r.proposition.signatories.length, 1);
-  assert.equal(r.proposition.support.eligible, false);
+  const admitted = await api(
+    `/api/propositions/${s.propId}/sponsor-requests/${asked.proposition.sponsor_requests[0].id}/accept`,
+    { method: 'POST', token: s.france.token }
+  );
+  assert.deepEqual(admitted.proposition.sponsors.map((x) => x.country_name), ['France', 'Brazil']);
+  assert.equal(admitted.proposition.sponsor_requests.length, 0);
+  assert.equal(admitted.proposition.support.teams, 2);
 
-  r = await sign(s.germany.token);
-  assert.equal(r.proposition.support.teams, 3);
-  assert.equal(r.proposition.support.percent, 0.15);
-  assert.equal(r.proposition.support.eligible, false);
+  // A request can be turned down.
+  await api(`/api/propositions/${s.propId}/sponsor-request`, { method: 'POST', token: s.india.token });
+  const { proposition } = await api(`/api/propositions/${s.propId}`, { token: s.brazil.token });
+  const indias = proposition.sponsor_requests[0];
+  const declined = await api(
+    `/api/propositions/${s.propId}/sponsor-requests/${indias.id}/decline`,
+    { method: 'POST', token: s.brazil.token }
+  );
+  assert.equal(declined.proposition.sponsors.length, 2);
+  assert.equal(declined.proposition.sponsor_requests.length, 0);
+});
 
-  // 4 of 20 delegations = 20% exactly, which is enough.
-  r = await sign(s.kenya.token);
-  assert.equal(r.proposition.support.teams, 4);
-  assert.equal(r.proposition.support.percent, 0.2);
-  assert.equal(r.proposition.support.eligible, true);
+test('no sponsor can withdraw a proposition over the others’ heads', async () => {
+  const refused = await api(`/api/propositions/${s.propId}/withdraw`, {
+    method: 'POST', token: s.france.token, expect: 409,
+  });
+  assert.match(refused.error, /jointly with Brazil/);
+
+  // Standing down is the way out — unless you are the last one holding it.
+  const { proposition } = await api(`/api/projects/${s.projectId}/propositions`, {
+    method: 'POST', token: s.japan.token, body: { name: 'Solo text', content: 'alone' },
+  }).then((r) => r);
+  await api(`/api/propositions/${proposition.id}/submit`, { method: 'PATCH', token: s.japan.token });
+
+  const stuck = await api(`/api/propositions/${proposition.id}/support/sponsor`, {
+    method: 'DELETE', token: s.japan.token, expect: 409,
+  });
+  assert.match(stuck.error, /only sponsor left/);
+
+  const gone = await api(`/api/propositions/${proposition.id}/withdraw`, {
+    method: 'POST', token: s.japan.token,
+  });
+  assert.equal(gone.proposition.status, 'withdrawn');
 });
 
 test('an amendment is adopted only when every sponsor has approved', async () => {
@@ -359,7 +410,8 @@ test('an amendment can be detached into a standalone rival proposition', async (
 
   assert.equal(r.amendment.status, 'detached');
   assert.equal(r.proposition.status, 'active');
-  assert.equal(r.proposition.initiating_team.country_name, 'Kenya');
+  // The delegation that wrote it carries it: its first and only sponsor.
+  assert.deepEqual(r.proposition.sponsors.map((x) => x.country_name), ['Kenya']);
   assert.equal(r.proposition.current_version.number, 1);
   assert.match(r.proposition.current_version.markdown_content, /Kenya addition/);
 
@@ -367,25 +419,29 @@ test('an amendment can be detached into a standalone rival proposition', async (
   assert.equal(after.propositions.length, before.propositions.length + 1);
 });
 
-test('amendments to a proposition with no sponsors cannot be approved into existence', async () => {
+test('a single sponsor is enough to carry an amendment through', async () => {
   const { proposition } = await api(`/api/projects/${s.projectId}/propositions`, {
     method: 'POST', token: s.india.token,
     body: { name: 'Unsponsored text', content: 'body' },
   });
+  // Writing it already made India its sponsor, so the amendment has someone to
+  // answer to from the start.
+  assert.deepEqual(proposition.sponsors.map((x) => x.country_name), ['India']);
   await api(`/api/propositions/${proposition.id}/submit`, { method: 'PATCH', token: s.india.token });
+
   const { amendment } = await api(`/api/propositions/${proposition.id}/amendments`, {
     method: 'POST', token: s.germany.token, body: { name: 'Tweak', content: 'body 2' },
   });
   await api(`/api/amendments/${amendment.id}/submit`, { method: 'PATCH', token: s.germany.token });
 
-  const refused = await api(`/api/amendments/${amendment.id}/approve`, {
+  const notSponsor = await api(`/api/amendments/${amendment.id}/approve`, {
     method: 'POST', token: s.germany.token, expect: 409,
   });
-  assert.match(refused.error, /no sponsors/);
+  assert.match(notSponsor.error, /Only sponsors/);
 
-  // With one sponsor in place, that sponsor alone is enough.
-  await api(`/api/propositions/${proposition.id}/sponsor`, { method: 'POST', token: s.india.token });
-  const ok = await api(`/api/amendments/${amendment.id}/approve`, { method: 'POST', token: s.india.token });
+  const ok = await api(`/api/amendments/${amendment.id}/approve`, {
+    method: 'POST', token: s.india.token,
+  });
   assert.equal(ok.adopted, true);
 });
 
@@ -396,8 +452,7 @@ test('standing down as a sponsor can release an amendment that was waiting on yo
   });
   const propId = proposition.id;
   await api(`/api/propositions/${propId}/submit`, { method: 'PATCH', token: s.india.token });
-  await api(`/api/propositions/${propId}/sponsor`, { method: 'POST', token: s.india.token });
-  await api(`/api/propositions/${propId}/sponsor`, { method: 'POST', token: s.germany.token });
+  await admitSponsor(propId, s.germany.token, s.india.token);
 
   const { amendment } = await api(`/api/propositions/${propId}/amendments`, {
     method: 'POST', token: s.brazil.token, body: { name: 'Beta', content: 'beta' },
@@ -483,8 +538,9 @@ test('the secretariat observes every committee and writes to none', async () => 
   // Everything that would put them on the floor is refused.
   for (const [method, path, body] of [
     ['POST', `/api/projects/${s.projectId}/propositions`, { name: 'No', content: 'x' }],
-    ['POST', `/api/propositions/${s.propId}/sponsor`, undefined],
-    ['POST', `/api/propositions/${s.propId}/sign`, undefined],
+    ['POST', `/api/propositions/${s.propId}/sponsor-request`, undefined],
+    ['POST', `/api/propositions/${s.propId}/sign`, { undertaking: true }],
+    ['POST', `/api/propositions/${s.propId}/ready`, undefined],
     ['POST', `/api/propositions/${s.propId}/amendments`, { name: 'No', content: 'x' }],
     ['POST', `/api/amendments/${s.amendmentId}/approve`, undefined],
   ]) {
@@ -545,6 +601,99 @@ test('faculty sit with their delegation and keep a delegate\'s hands', async () 
   assert.ok(propositions.length > 0);
 });
 
+test('the sponsors close the text, then the committee signs it', async () => {
+  // Nothing is settled while an amendment is still in front of the sponsors.
+  const { amendment } = await api(`/api/propositions/${s.propId}/amendments`, {
+    method: 'POST', token: s.india.token, body: { name: 'One more clause', content: 'x' },
+  });
+  await api(`/api/amendments/${amendment.id}/submit`, { method: 'PATCH', token: s.india.token });
+  const blocked = await api(`/api/propositions/${s.propId}/ready`, {
+    method: 'POST', token: s.france.token, expect: 409,
+  });
+  assert.match(blocked.error, /in front of the sponsors/);
+  await api(`/api/amendments/${amendment.id}/withdraw`, { method: 'POST', token: s.india.token });
+
+  // Signatures are not open until the sponsors say the text is final.
+  const early = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.germany.token, body: { undertaking: true }, expect: 409,
+  });
+  assert.match(early.error, /not collecting signatures yet/);
+
+  // One sponsor is not all of them.
+  let r = await api(`/api/propositions/${s.propId}/ready`, { method: 'POST', token: s.france.token });
+  assert.equal(r.proposition.status, 'active');
+  assert.equal(r.proposition.readiness.ready_count, 1);
+  assert.equal(r.proposition.readiness.sponsor_count, 2);
+
+  r = await api(`/api/propositions/${s.propId}/ready`, { method: 'POST', token: s.brazil.token });
+  assert.equal(r.proposition.status, 'collecting');
+  assert.equal(r.proposition.readiness.all_ready, true);
+
+  // A settled text cannot be amended behind the signatories' backs.
+  const shut = await api(`/api/propositions/${s.propId}/amendments`, {
+    method: 'POST', token: s.kenya.token, body: { name: 'Sneak', content: 'y' }, expect: 409,
+  });
+  assert.match(shut.error, /reopened/);
+
+  // Signing is deliberate, and recorded against the version signed.
+  const unconfirmed = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.germany.token, body: {}, expect: 400,
+  });
+  assert.match(unconfirmed.error, /knowingly/);
+
+  const sponsorSigning = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.brazil.token, body: { undertaking: true }, expect: 409,
+  });
+  assert.match(sponsorSigning.error, /sponsors carry it/);
+
+  r = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.germany.token, body: { undertaking: true },
+  });
+  assert.equal(r.proposition.status, 'collecting');
+  assert.equal(r.proposition.support.teams, 3);
+  const signature = r.proposition.signatories[0];
+  assert.equal(signature.country_name, 'Germany');
+  assert.equal(signature.version_number, r.proposition.current_version.number);
+  assert.equal(signature.stale, false);
+
+  // 4 of 20 delegations is the 20% that makes it presentable.
+  r = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.kenya.token, body: { undertaking: true },
+  });
+  assert.equal(r.proposition.support.teams, 4);
+  assert.equal(r.proposition.status, 'ready');
+
+  // Signatories keep coming after the threshold.
+  r = await api(`/api/propositions/${s.propId}/sign`, {
+    method: 'POST', token: s.india.token, body: { undertaking: true },
+  });
+  assert.equal(r.proposition.status, 'ready');
+  assert.equal(r.proposition.signatories.length, 3);
+
+  // A sponsor taking their word back reopens the text for everyone.
+  r = await api(`/api/propositions/${s.propId}/ready`, { method: 'DELETE', token: s.brazil.token });
+  assert.equal(r.proposition.status, 'active');
+  assert.equal(r.proposition.signatories.length, 3);
+
+  // And an amendment adopted now leaves those signatures visibly behind.
+  const { amendment: change } = await api(`/api/propositions/${s.propId}/amendments`, {
+    method: 'POST', token: s.kenya.token,
+    body: { name: 'Add a final clause', content: 'Wholly rewritten text.' },
+  });
+  await api(`/api/amendments/${change.id}/submit`, { method: 'PATCH', token: s.kenya.token });
+  await api(`/api/amendments/${change.id}/approve`, { method: 'POST', token: s.france.token });
+  r = await api(`/api/amendments/${change.id}/approve`, { method: 'POST', token: s.brazil.token });
+  assert.equal(r.adopted, true);
+  assert.equal(r.proposition.status, 'active');
+  assert.equal(r.proposition.readiness.ready_count, 0);
+  assert.ok(r.proposition.signatories.every((x) => x.stale));
+
+  // Put it back together for the tests that follow.
+  await api(`/api/propositions/${s.propId}/ready`, { method: 'POST', token: s.france.token });
+  r = await api(`/api/propositions/${s.propId}/ready`, { method: 'POST', token: s.brazil.token });
+  assert.equal(r.proposition.status, 'ready');
+});
+
 test('the committee and its agenda can be corrected after the fact', async () => {
   // The seat count is the threshold denominator, so changing it moves every
   // eligibility figure at once: 4 of 20 was enough, 4 of 40 is not.
@@ -555,6 +704,8 @@ test('the committee and its agenda can be corrected after the fact', async () =>
   let { proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token });
   assert.equal(proposition.support.total_members, 40);
   assert.equal(proposition.support.eligible, false);
+  // 5 of 40 is no longer enough, so it falls back to collecting signatures.
+  assert.equal(proposition.status, 'collecting');
 
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.kenya.token,
@@ -562,6 +713,7 @@ test('the committee and its agenda can be corrected after the fact', async () =>
   });
   ({ proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token }));
   assert.equal(proposition.support.eligible, true);
+  assert.equal(proposition.status, 'ready');
 
   // An agenda item can be renamed, and removed only while it is empty.
   const { project } = await api(`/api/committees/${s.committeeId}/projects`, {

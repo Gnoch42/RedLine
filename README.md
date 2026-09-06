@@ -99,26 +99,51 @@ moderator; nothing in the app requires elevated privileges, by design.
 
 ## The rules the app enforces
 
-- **Drafts belong to the delegation.** Every delegate of that country can read and revise
-  them; the rest of the committee cannot see them at all. Submitting makes a proposition
-  or amendment visible to everyone.
+### How a proposition travels
+
+```
+draft ──submit──> open ──every sponsor calls it settled──> signing ──20%──> ready
+                   ▲                                          │              │
+                   └──────── any sponsor takes that back ──────┴──────────────┘
+```
+
+- **A proposition belongs to its sponsors, jointly and equally.** Writing one makes you its
+  first sponsor, not its owner: there is no instigator and no privileged author.
+- **Sponsorship is by admission.** A delegation asks to sponsor — with a note, if it wants
+  to make its case — and a delegation already sponsoring admits or declines it. Nobody
+  joins unilaterally.
+- **No sponsor can withdraw a proposition over the others' heads.** A sponsor who no longer
+  supports it stands down; the last one left, with nobody else behind the text, can
+  withdraw it.
+- **Drafts belong to the sponsors** — at that stage, to the one delegation that wrote it.
+  Every delegate of that country can read and revise them; the rest of the committee cannot
+  see them at all.
 - **Versions are immutable.** Each one records its author and its parent, so the whole
   history can be walked backwards and any two versions compared.
-- **A live proposition's text cannot be edited directly** — only a private draft can.
-  Once it is submitted, the text moves only by amendment.
+- **A live proposition's text cannot be edited directly** — only a private draft can. Once
+  it is submitted, the text moves only by amendment.
 - **An amendment needs every current sponsor of the target proposition**, tracked
-  individually so the UI can show "3/5 sponsors approved". The amendment's own
-  co-sponsors are its authors and carry no approval weight. On the last approval a new
-  version is generated automatically and the amendment is marked adopted.
-- **Conflicting amendments freeze rather than merge.** When one amendment is adopted,
-  every other pending amendment written against the version it superseded is frozen and
-  flagged. Its authors reapply it to the current version by hand; prior approvals are
-  cleared, because sponsors approved a different text.
+  individually so the UI can show "3/5 sponsors approved". The amendment's own co-sponsors
+  are its authors and carry no approval weight. On the last approval a new version is
+  generated automatically and the amendment is marked adopted.
+- **Conflicting amendments freeze rather than merge.** When one amendment is adopted, every
+  other pending amendment written against the version it superseded is frozen and flagged.
+  Its authors reapply it to the current version by hand; prior approvals are cleared,
+  because sponsors approved a different text.
 - **Detaching** takes an amendment out of the proposition and files it as a standalone
-  proposition of its own, seeded at version 1.
-- **20% to present.** Distinct delegations backing a proposition as sponsor and/or
-  signatory, over the seat count fixed when the committee was created. A delegation
-  holding both roles counts once.
+  proposition of its own, seeded at version 1 and sponsored by the delegation that wrote it.
+- **The sponsors close the text together.** Each declares it settled — *ready to collect
+  signatories* — which is only offered while no amendment is still in front of them. When
+  the last one does, the proposition moves to **signing**. Any sponsor taking that back
+  reopens it to amendment, and so does an amendment being submitted or adopted: nobody's
+  declaration survives the text moving.
+- **Signing is a commitment, and is asked for as one.** A delegation is shown the text as it
+  stands and must undertake, explicitly, to sign it as it stands before the signature is
+  recorded — against that version, so a signature given on an earlier draft is visibly
+  marked as such. Sponsors carry a proposition rather than sign it.
+- **20% to present.** Distinct delegations backing a proposition as sponsor and/or signatory,
+  over the seat count fixed when the committee was created. Crossing it turns **signing**
+  into **ready**; signatories keep being added afterwards.
 
 ## Finding people
 
@@ -185,14 +210,21 @@ Places where the build spec was silent, or where the implementation makes a call
   `Committee`; storing the same number twice only invites drift.
 - **Draft privacy is per user, so propositions and amendments carry an author user**
   alongside their author delegation.
-- **Sponsorship is not policed.** The spec says a sponsor is a delegation that
-  contributed content, but with no moderator there is nobody to adjudicate that, so any
-  delegation may take either role. Both can also be stood down again — standing down as a
-  sponsor is re-checked against pending amendments, since it can complete one that was
-  waiting on you.
-- **An amendment to a proposition with no sponsors cannot be approved.** "Every sponsor
-  has approved" is vacuously true when there are none; adopting on that would be wrong,
-  so approval requires at least one sponsor.
+- **Sponsorship is adjudicated by the sponsors, not by a moderator.** The spec says a
+  sponsor is a delegation that contributed content; with nobody above the committee to rule
+  on that, the people already carrying the text decide who joins them. Standing down is
+  re-checked against pending amendments, since a smaller sponsor set can complete an
+  approval that was waiting on you.
+- **Signatures are only collected on a closed text.** Undertaking to sign something that
+  can still be amended underneath you is not an undertaking, so signing opens only once the
+  sponsors have declared the text settled. During negotiation, support is the sponsors.
+- **A sponsor cannot also sign.** They already carry the text; counting them twice would
+  say nothing.
+- **Readiness is blocked by pending amendments only, not frozen ones.** A frozen amendment
+  needs its author to act, and should not be able to hold a proposition hostage.
+- **An amendment to a proposition with no sponsors cannot be approved.** "Every sponsor has
+  approved" is vacuously true when there are none. Since writing a proposition now makes you
+  its sponsor, this should be unreachable — the guard stays anyway.
 - **A draft amendment whose base has moved on is frozen when submitted**, rather than
   rejected — same state and same fix as a conflict discovered later.
 - **Diffs are over the Markdown source**, not rendered HTML. It is what a redline
@@ -243,15 +275,22 @@ PATCH  /api/projects/:id               { name, position }  rename / reorder
 DELETE /api/projects/:id               only while it holds no propositions
 
 GET    /api/projects/:id/propositions
-POST   /api/projects/:id/propositions  { name, content }  -> draft + v1
+POST   /api/projects/:id/propositions  { name, content }  -> draft + v1, you as first sponsor
 GET    /api/propositions/:id
 PATCH  /api/propositions/:id           retitle a draft
 POST   /api/propositions/:id/versions  { content, note }   drafts only
-PATCH  /api/propositions/:id/submit    draft -> active
-POST   /api/propositions/:id/withdraw
-POST   /api/propositions/:id/sponsor
-POST   /api/propositions/:id/sign
-DELETE /api/propositions/:id/support/:kind
+PATCH  /api/propositions/:id/submit    draft -> open
+POST   /api/propositions/:id/withdraw  last remaining sponsor only
+
+POST   /api/propositions/:id/sponsor-request           { message }  ask to be admitted
+DELETE /api/propositions/:id/sponsor-request           take the request back
+POST   /api/propositions/:id/sponsor-requests/:rid/accept   a sponsor lets them in
+POST   /api/propositions/:id/sponsor-requests/:rid/decline
+DELETE /api/propositions/:id/support/sponsor           stand down
+POST   /api/propositions/:id/ready     this sponsor calls the text settled
+DELETE /api/propositions/:id/ready     take that back, reopening it to amendment
+POST   /api/propositions/:id/sign      { undertaking: true }  signing / ready only
+DELETE /api/propositions/:id/support/signatory
 GET    /api/propositions/:id/versions
 GET    /api/propositions/:id/versions/:versionId
 GET    /api/propositions/:id/versions/diff?from=&to=
