@@ -235,8 +235,13 @@ function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
   );
 }
 
+/**
+ * The code you hand out is your delegation's. Anyone without one — the
+ * secretariat, or a delegate looking in on a committee they hold no seat on —
+ * has nothing to give away, and says so.
+ */
 function Codes({ user }) {
-  if (user.role === 'secretariat') {
+  if (!user.team) {
     return (
       <>
         {user.personal_code && (
@@ -246,11 +251,14 @@ function Codes({ user }) {
           />
         )}
         <p style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-          Delegations hand out their own join codes; yours gets you into every committee.
+          {user.role === 'secretariat'
+            ? `Delegations hand out their own join codes; yours gets you into every committee.`
+            : `You are looking in on ${user.committee.name} without a delegation, so there is no join code to give out here. Take a seat on it and you will have one to share with your fellow delegates.`}
         </p>
       </>
     );
   }
+
   return (
     <>
       <CodeCard
@@ -274,9 +282,13 @@ function Account({ user, seat, onSaved, onLeave }) {
     phone: user.phone || '',
     country: user.country || '',
   });
+  const [primary, setPrimary] = useState(!!seat?.is_primary);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
+
+  // The seat arrives with the committee fetch, which may land after this mounts.
+  useEffect(() => { setPrimary(!!seat?.is_primary); }, [seat?.is_primary]);
 
   const staff = user.role === 'secretariat';
   const dirty = values.delegate_name !== user.delegate_name
@@ -326,21 +338,31 @@ function Account({ user, seat, onSaved, onLeave }) {
             onChange={(country) => { setValues((v) => ({ ...v, country })); setSaved(false); }}
           />
           <span className="hint">
-            The default when you register a delegation. Changing it leaves the delegations you
-            already hold untouched.
+            Every delegation you register is under it. Changing it leaves the ones you already
+            hold untouched.
           </span>
         </div>
       )}
+
       {user.team && (
         <label className="signature-check" style={{ marginBottom: 14 }}>
           <input
             type="checkbox"
-            checked={!!seat?.is_primary}
+            checked={primary}
             onChange={async (event) => {
-              await api(`/auth/seats/${user.team.id}`, {
-                method: 'PATCH', body: { is_primary: event.target.checked },
-              });
-              onSaved();
+              // Answer the click straight away; the reload behind it only
+              // confirms what the box already shows.
+              const next = event.target.checked;
+              setPrimary(next);
+              try {
+                await api(`/auth/seats/${user.team.id}`, {
+                  method: 'PATCH', body: { is_primary: next },
+                });
+                onSaved();
+              } catch (err) {
+                setPrimary(!next);
+                setError(err.message);
+              }
             }}
           />
           <span>
@@ -451,10 +473,18 @@ const TABS = [
 export function CommitteeModal({ user, onClose, onChanged, onLeave, initialTab = 'codes' }) {
   const [tab, setTab] = useState(initialTab);
   const [data, setData] = useState(null);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     api(`/committees/${user.committee.id}`).then(setData).catch(() => setData(null));
-  }, [user.committee.id, tab]);
+  }, [user.committee.id, tab, nonce]);
+
+  // Anything saved in here changes what this same request returns, so refetch it
+  // alongside telling the rest of the app.
+  const changed = () => {
+    setNonce((n) => n + 1);
+    onChanged();
+  };
 
   return (
     <Modal title={user.committee.name} subtitle="Committee" onClose={onClose}>
@@ -466,10 +496,10 @@ export function CommitteeModal({ user, onClose, onChanged, onLeave, initialTab =
         ))}
       </div>
       {tab === 'codes' && <Codes user={user} />}
-      {tab === 'agenda' && <Agenda committee={user.committee} onChanged={onChanged} />}
-      {tab === 'settings' && <Settings committee={user.committee} data={data} onSaved={onChanged} />}
+      {tab === 'agenda' && <Agenda committee={user.committee} onChanged={changed} />}
+      {tab === 'settings' && <Settings committee={user.committee} data={data} onSaved={changed} />}
       {tab === 'delegations' && (
-        <Delegations user={user} data={data} onSaved={onChanged} onLeave={onLeave} />
+        <Delegations user={user} data={data} onSaved={changed} onLeave={onLeave} />
       )}
     </Modal>
   );

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { ErrorBoundary } from './ErrorBoundary.jsx';
 
 export function Modal({ title, subtitle, onClose, children, footer, wide = false }) {
   useEffect(() => {
@@ -16,7 +17,7 @@ export function Modal({ title, subtitle, onClose, children, footer, wide = false
           <span className="spacer" />
           <button type="button" className="btn btn--ghost btn--small" onClick={onClose}>Close</button>
         </div>
-        <div className="modal__body">{children}</div>
+        <div className="modal__body"><ErrorBoundary>{children}</ErrorBoundary></div>
         {footer && <div className="modal__foot">{footer}</div>}
       </div>
     </div>
