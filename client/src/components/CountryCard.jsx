@@ -76,6 +76,16 @@ function CountryModal({ country, onClose }) {
                     {person.role !== 'delegate' && (
                       <span className="label" style={{ marginLeft: 6 }}>{ROLE_LABEL[person.role]}</span>
                     )}
+                    {person.is_primary && (
+                      <span className="chip chip--works" title="This is one of their working committees">
+                        works here
+                      </span>
+                    )}
+                    {!person.is_primary && person.also_on.length > 0 && (
+                      <span className="label" style={{ marginLeft: 6 }}>
+                        works on {person.also_on.join(', ')}
+                      </span>
+                    )}
                     <span className="person__contact">
                       <a href={`mailto:${person.email}`} onClick={(e) => e.stopPropagation()}>
                         {person.email}

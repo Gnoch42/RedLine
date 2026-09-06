@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { one, run, uniqueCode } from '../db.js';
-import { bad, conflict, missing, str } from '../http.js';
+import { bad, conflict, denied, missing, str } from '../http.js';
 import {
   createSession, destroySession, requireUser, serializeUser, userFromToken,
-  joinTeam, isMember, sit, ROLES,
+  joinTeam, isMember, sit, ROLES, mayEnterCommittee, seatIn,
 } from '../auth.js';
 
 export const authRoutes = Router();
@@ -102,21 +102,35 @@ authRoutes.patch('/me', requireUser, (req, res) => {
 });
 
 /**
- * Move between committees: a delegate to a seat they hold, the secretariat to
- * any committee at all — overseeing every room is the job.
+ * Move to a committee. Naming one by id sits you in your seat there if you hold
+ * one, and otherwise lets you look in without taking one — not every country is
+ * seated on every committee, and watching a room you are not on is ordinary.
  */
 authRoutes.post('/switch', requireUser, (req, res) => {
-  if (req.body?.committee_id !== undefined && req.user.role === 'secretariat') {
+  if (req.body?.committee_id !== undefined) {
     const committeeId = Number(req.body.committee_id);
     if (!one('SELECT id FROM committees WHERE id = ?', committeeId)) {
       throw missing('No such committee.');
     }
-    sit(req.token, { committeeId });
+    if (!mayEnterCommittee(req.user, committeeId)) {
+      throw denied('This committee seats only the countries on its list, and yours is not one of them.');
+    }
+    const teamId = seatIn(req.user.id, committeeId);
+    sit(req.token, teamId ? { teamId } : { committeeId });
     return res.json({ user: serializeUser(userFromToken(req.token)) });
   }
 
   const teamId = Number(req.body?.team_id);
   if (!isMember(req.user.id, teamId)) throw missing('You do not have a seat in that delegation.');
   sit(req.token, { teamId });
+  res.json({ user: serializeUser(userFromToken(req.token)) });
+});
+
+/** Mark a seat as one you actually work on, or stop. */
+authRoutes.patch('/seats/:teamId', requireUser, (req, res) => {
+  const teamId = Number(req.params.teamId);
+  if (!isMember(req.user.id, teamId)) throw missing('You do not have a seat in that delegation.');
+  run('UPDATE memberships SET is_primary = ? WHERE user_id = ? AND team_id = ?',
+    req.body?.is_primary ? 1 : 0, req.user.id, teamId);
   res.json({ user: serializeUser(userFromToken(req.token)) });
 });

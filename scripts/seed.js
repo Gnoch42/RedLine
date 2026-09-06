@@ -120,6 +120,11 @@ const main = async () => {
   const staffToken = await register(`marc.${stamp}@example.org`, 'Marc Aubry', '', { role: 'secretariat' });
   const { user: staff } = await call('/auth/me', { token: staffToken });
 
+  // Camille works this committee; Théo keeps an eye on it from another.
+  await call(`/auth/seats/${fr.team.id}`, {
+    method: 'PATCH', token: founder, body: { is_primary: true },
+  });
+
   const { projects } = await call(`/committees/${fr.committee.id}/projects`, { token: founder });
   const project = projects[0];
 

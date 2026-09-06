@@ -588,7 +588,7 @@ test('a country card gathers its delegates across every committee', async () => 
   await api('/api/countries/Atlantis', { token: s.germany.token, expect: 404 });
 });
 
-test('faculty sit with their delegation and keep a delegate\'s hands', async () => {
+test('faculty sit with their delegation, and read without writing', async () => {
   await register('prof@example.org', 'Mme Roy', 'France', { role: 'faculty' });
   // The delegation's join code seats them beside its delegates.
   const { token, user } = await api('/api/auth/login', {
@@ -596,9 +596,114 @@ test('faculty sit with their delegation and keep a delegate\'s hands', async () 
   });
   assert.equal(user.role, 'faculty');
   assert.equal(user.team.country_name, 'France');
+  assert.equal(user.can_draft, false);
 
+  // They see everything their delegation sees, drafts included.
   const { propositions } = await api(`/api/projects/${s.projectId}/propositions`, { token });
   assert.ok(propositions.length > 0);
+
+  const refused = await api(`/api/projects/${s.projectId}/propositions`, {
+    method: 'POST', token, body: { name: 'From the teacher', content: 'x' }, expect: 403,
+  });
+  assert.match(refused.error, /Faculty observes/);
+});
+
+test('a delegation can look in on a committee it holds no seat on', async () => {
+  // Japan sits on UNDP; UNEP is another room entirely.
+  const { committees } = await api('/api/committees', { token: s.japan.token });
+  const unep = committees.find((c) => c.name === 'UNEP');
+  assert.equal(unep.may_enter, true);
+  assert.equal(unep.my_team_id, null);
+
+  const { user } = await api('/api/auth/switch', {
+    method: 'POST', token: s.japan.token, body: { committee_id: unep.id },
+  });
+  assert.equal(user.committee.id, unep.id);
+  assert.equal(user.team, null);
+  assert.equal(user.observing, true);
+  assert.equal(user.can_draft, false);
+
+  // Looking in does not take a seat: the room's registration is unchanged.
+  const { committees: after } = await api('/api/committees', { token: s.japan.token });
+  assert.equal(after.find((c) => c.id === unep.id).registered_teams, unep.registered_teams);
+
+  const { projects } = await api(`/api/committees/${unep.id}/board`, { token: s.japan.token });
+  const refused = await api(`/api/committees/${unep.id}/projects`, {
+    method: 'POST', token: s.japan.token, body: { name: 'Nope' },
+  }).then(() => null).catch((err) => err);
+  assert.ok(Array.isArray(projects));
+  assert.equal(refused, null, 'agenda edits are open to anyone in the room');
+
+  // Back to its own seat.
+  await api('/api/auth/switch', {
+    method: 'POST', token: s.japan.token, body: { committee_id: s.committeeId },
+  });
+  const { user: home } = await api('/api/auth/me', { token: s.japan.token });
+  assert.equal(home.team.country_name, 'Japan');
+});
+
+test('a whitelist decides who may sit or even look in', async () => {
+  const listed = ['France', 'Brazil', 'Germany', 'Kenya', 'India', 'Japan', 'Australia',
+    'Sovereign Order of Malta'];
+  await api(`/api/committees/${s.committeeId}`, {
+    method: 'PATCH', token: s.france.token,
+    body: {
+      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      whitelist_enabled: true, whitelist: listed,
+    },
+  });
+
+  const { committee, whitelist } = await api(`/api/committees/${s.committeeId}`, {
+    token: s.france.token,
+  });
+  assert.equal(committee.whitelist_enabled, true);
+  assert.deepEqual(whitelist, [...listed].sort((a, b) => a.localeCompare(b)));
+
+  // A country not on the list cannot look in, nor register a delegation.
+  const outsider = await register('outsider2@example.org', 'Tomas', 'Czechia');
+  const blocked = await api('/api/auth/switch', {
+    method: 'POST', token: outsider, body: { committee_id: s.committeeId }, expect: 403,
+  });
+  assert.match(blocked.error, /only the countries on its list/);
+  await api('/api/teams', {
+    method: 'POST', token: outsider,
+    body: { committee_id: s.committeeId, country_name: 'Czechia' }, expect: 403,
+  });
+
+  // The secretariat is never shut out.
+  const { user: staff } = await api('/api/auth/switch', {
+    method: 'POST', token: s.secretariatToken, body: { committee_id: s.committeeId },
+  });
+  assert.equal(staff.committee.id, s.committeeId);
+
+  // And a delegation already seated stays seated.
+  const { user: seated } = await api('/api/auth/switch', {
+    method: 'POST', token: s.germany.token, body: { committee_id: s.committeeId },
+  });
+  assert.equal(seated.team.country_name, 'Germany');
+
+  await api(`/api/committees/${s.committeeId}`, {
+    method: 'PATCH', token: s.france.token,
+    body: {
+      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      whitelist_enabled: false, whitelist: listed,
+    },
+  });
+});
+
+test('a delegate marks which committees they actually work on', async () => {
+  const { user } = await api(`/api/auth/seats/${s.france.teamId}`, {
+    method: 'PATCH', token: s.france.token, body: { is_primary: true },
+  });
+  const seat = user.seats.find((x) => x.team_id === s.france.teamId);
+  assert.equal(seat.is_primary, 1);
+
+  const { delegations } = await api('/api/countries/France', { token: s.germany.token });
+  const undp = delegations.find((d) => d.committee_id === s.committeeId);
+  const camille = undp.delegates.find((d) => d.delegate_name === 'Camille');
+  assert.equal(camille.is_primary, true);
+  // Her fellow delegate has not marked it, so the card shows who works where.
+  assert.equal(undp.delegates.some((d) => d.is_primary === false), true);
 });
 
 test('the sponsors close the text, then the committee signs it', async () => {

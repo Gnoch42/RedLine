@@ -23,15 +23,24 @@ function CommitteeSwitcher({ user, onSwitch, onAddSeat }) {
     api('/committees').then(({ committees }) => setAll(committees)).catch(() => setAll([]));
   }, [staff, user.committee.id]);
 
+  // Everything is addressed by committee: the server seats you where you have a
+  // seat and otherwise lets you look in, so a room being watched belongs on the
+  // list beside the ones being worked.
   const options = staff
     ? all.map((c) => [c.id, c.name])
-    : (user.seats || []).map((seat) => [seat.team_id, `${seat.committee_name} · ${seat.country_name}`]);
+    : (user.seats || []).map((seat) => [
+        seat.committee_id,
+        `${seat.committee_name} · ${seat.country_name}${seat.is_primary ? ' ★' : ''}`,
+      ]);
+  if (!staff && !options.some(([id]) => id === user.committee.id)) {
+    options.unshift([user.committee.id, `${user.committee.name} · looking in`]);
+  }
 
   return (
     <label className="switcher">
       <span className="label">Committee</span>
       <select
-        value={staff ? user.committee.id : user.team.id}
+        value={user.committee.id}
         onChange={(event) => {
           if (event.target.value === 'add') onAddSeat();
           else onSwitch(Number(event.target.value));
@@ -109,8 +118,9 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
 
   const switchCommittee = async (id) => {
     try {
-      const body = user.role === 'secretariat' ? { committee_id: id } : { team_id: id };
-      const { user: next } = await api('/auth/switch', { method: 'POST', body });
+      const { user: next } = await api('/auth/switch', {
+        method: 'POST', body: { committee_id: id },
+      });
       setSelectedPropositionId(null);
       setSelectedAmendmentId(null);
       setPanel('left');
@@ -208,7 +218,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
   }), [act, proposition, amendment]);
 
   const currentVersion = proposition?.current_version;
-  const canAct = user.role !== 'secretariat';
+  const canAct = user.can_draft;
 
   return (
     <CountryProvider>
@@ -229,7 +239,11 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
         </div>
         <span className="masthead__spacer" />
         <div className="masthead__identity">
-          <div className="country">{user.team ? user.team.country_name : 'Secretariat'}</div>
+          <div className="country">
+            {user.team
+              ? user.team.country_name
+              : user.role === 'secretariat' ? 'Secretariat' : 'Observing'}
+          </div>
           <div className="delegate">{user.delegate_name}</div>
         </div>
         <button className="btn btn--small" onClick={() => setModal({ type: 'committee' })}>Committee</button>

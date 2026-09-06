@@ -56,8 +56,19 @@ CREATE TABLE IF NOT EXISTS memberships (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   team_id    INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  -- A delegate's working committee, as opposed to one they keep an eye on.
+  -- Several may be marked; the country card shows who works where.
+  is_primary INTEGER NOT NULL DEFAULT 0,
   created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE (user_id, team_id)
+);
+
+-- The countries a committee officially seats. Empty and unenforced unless the
+-- committee turns its whitelist on.
+CREATE TABLE IF NOT EXISTS committee_countries (
+  committee_id INTEGER NOT NULL REFERENCES committees(id) ON DELETE CASCADE,
+  country_name TEXT    NOT NULL,
+  PRIMARY KEY (committee_id, country_name)
 );
 
 -- Where the session is currently sitting. A delegate sits in a delegation, and

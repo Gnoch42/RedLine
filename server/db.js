@@ -104,6 +104,13 @@ function migrate() {
                 ORDER BY m.id LIMIT 1)`);
   }
 
+  if (!columnsOf('memberships').includes('is_primary')) {
+    db.exec('ALTER TABLE memberships ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columnsOf('committees').includes('whitelist_enabled')) {
+    db.exec('ALTER TABLE committees ADD COLUMN whitelist_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+
   if (!columnsOf('approvals').includes('version_id')) {
     db.exec('ALTER TABLE approvals ADD COLUMN version_id INTEGER REFERENCES versions(id)');
     // Existing signatures were given against whatever stood at the time; the

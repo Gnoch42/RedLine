@@ -30,12 +30,10 @@ export default function App() {
     return <Blank mark="§" title="Opening the file room">One moment.</Blank>;
   }
 
-  // A committee is what the workbench needs. The secretariat has one without
-  // ever holding a delegation, so a seat is the wrong thing to test for —
-  // though everyone else does still need one.
-  const seated = state.user?.committee
-    && (state.user.team || state.user.role === 'secretariat');
-  if (!seated || seating) {
+  // A committee is what the workbench needs, and a delegation is not: the
+  // secretariat holds none, and a delegate may be looking in on a room their
+  // country has no seat on. The server decides who may be in which room.
+  if (!state.user?.committee || seating) {
     return (
       <Lobby
         initialUser={state.user}

@@ -213,6 +213,10 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
       onSwitched(committee.my_team_id);
       return;
     }
+    if (!committee.may_enter) {
+      setError(`${committee.name} seats only the countries on its list, and ${me?.country} is not one of them.`);
+      return;
+    }
     setChosen(committee);
     setChanging(false);
     const taken = committee.taken_countries.map((c) => c.toLowerCase());
@@ -289,7 +293,17 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
         {error && <div className="notice" style={{ marginBottom: 12 }}>{error}</div>}
 
         <button className="btn btn--primary btn--block" onClick={join} disabled={busy || !country.trim()}>
-          {busy ? 'Joining…' : `Join ${chosen.name}`}
+          {busy ? 'Joining…' : `Take ${chosen.name}'s ${country || ''} seat`.replace(/\s+/g, ' ')}
+        </button>
+        {/* Not every country is seated on every committee, and watching one you
+            are not on is ordinary. */}
+        <button
+          className="btn btn--block"
+          style={{ marginTop: 8 }}
+          onClick={() => onOpenCommittee(chosen.id)}
+          disabled={busy}
+        >
+          Just look in, without taking a seat
         </button>
         <div className="lobby__switch">
           <button type="button" onClick={() => setChosen(null)}>Back to the list</button>
@@ -322,7 +336,9 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
             <span className="seat__committee">
               {!staff && committee.my_team_id
                 ? 'you are seated here'
-                : `${committee.registered_teams}/${committee.total_members} seats`}
+                : committee.may_enter
+                  ? `${committee.registered_teams}/${committee.total_members} seats`
+                  : 'closed to your country'}
             </span>
           </button>
         ))}

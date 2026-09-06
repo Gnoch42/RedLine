@@ -72,7 +72,8 @@ what they are at the conference.
   account holds as many seats as you like, which is the usual case when the same delegate
   sits on several committees.
 - **Faculty** — an accompanying teacher or advisor. They sit with their delegation, using
-  its join code, and have the same hands as its delegates.
+  its join code, and see everything it sees, private drafts included. Like the secretariat,
+  they read the drafting floor without writing to it.
 - **Secretariat** — the people running the event. They pick no country, hold no delegation,
   and can open any committee to read it. They propose nothing, sponsor nothing and approve
   nothing, and they never occupy one of the committee's seats, so they cannot move the 20%
@@ -85,6 +86,9 @@ what they are at the conference.
    sees. Joining is one click: the country comes from the account, and the ones already
    spoken for on that committee are shown but cannot be picked, so a clash is visible
    before anything is submitted. Nothing has to be handed out for this to work.
+   A country is not seated on every committee, so the same list also offers to **look in
+   without taking a seat** — you read the room, you do not act in it, and the committee's
+   seat count is untouched.
 3. The **delegation join code** goes to a delegation's own delegates and its faculty. It
    is both the invitation and the password: signing in is an email plus that code, and it
    can be copied or scanned as a QR.
@@ -94,8 +98,14 @@ interface no longer asks anyone for it — the list is the way in.
 
 Everyone seated on a committee can correct its settings afterwards — its name, its
 description, the seat count behind the 20% threshold, and the agenda itself — and your own
-name and country under Committee → Delegations. There is no organiser account and no
+name, country and phone under Committee → Delegations. There is no organiser account and no
 moderator; nothing in the app requires elevated privileges, by design.
+
+A committee that seats a fixed roster can turn on a **whitelist** of countries under
+Committee → Settings. With it in force, a country not on the list can neither register a
+delegation nor look in — its delegates and its faculty alike. The event secretariat is never
+shut out, and a delegation that registered before the list went up keeps the access it has,
+so nobody's work is stranded mid-conference; the settings screen names any such country.
 
 ## The rules the app enforces
 
@@ -137,6 +147,9 @@ draft ──submit──> open ──every sponsor calls it settled──> signi
   the last one does, the proposition moves to **signing**. Any sponsor taking that back
   reopens it to amendment, and so does an amendment being submitted or adopted: nobody's
   declaration survives the text moving.
+- **The signature list and the 20% meter appear only once signing is open.** Before the
+  sponsors close the text there is nothing to sign, so a progress bar toward a threshold
+  nobody can move yet would only mislead.
 - **Signing is a commitment, and is asked for as one.** A delegation is shown the text as it
   stands and must undertake, explicitly, to sign it as it stands before the signature is
   recorded — against that version, so a signature given on an earlier draft is visibly
@@ -149,9 +162,13 @@ draft ──submit──> open ──every sponsor calls it settled──> signi
 
 Any country name in the interface — on a card, in a sponsor list, beside an amendment —
 opens that country's card: who speaks for it on each committee, with their role, email and
-phone, and what that delegation has put on the table there. Contact details are shared
-across the whole conference on purpose: finding the delegate you need to negotiate with is
-the point of it. Leave the phone field empty to keep that one to yourself.
+phone, and what that delegation sponsors there. A delegate can mark a committee as one they
+actually **work on**, and the card says so, so the conference can see who covers what and a
+delegation knows who to send when it wants to follow a room it does not sit in.
+
+Contact details are shared across the whole conference on purpose: finding the delegate you
+need to negotiate with is the point of it. Leave the phone field empty to keep that one to
+yourself.
 
 ## What the interface looks like
 
@@ -197,12 +214,18 @@ Places where the build spec was silent, or where the implementation makes a call
 - **The account's country is a default, not a constraint.** A delegate who speaks for
   someone else on another committee changes it there, and the seats they already hold are
   untouched.
-- **Faculty have the same hands as delegates.** They sit inside a delegation, see its
-  private drafts, and can sponsor and approve on its behalf. That is a choice, not a
-  finding: restricting them to reading would be a one-line change to `requireDelegation`.
-- **The secretariat can still edit committee settings and the agenda.** Setting up the room
-  is administration, not drafting, and every delegate can do it too — there is no
-  moderator. What they cannot do is put text on the table or support it.
+- **Faculty read without writing.** They sit inside a delegation and see its private drafts,
+  which is what supervising a delegation needs; proposing, sponsoring and approving are for
+  its delegates.
+- **The secretariat and faculty can still edit committee settings and the agenda.** Setting
+  up the room is administration, not drafting, and every delegate can do it too — there is
+  no moderator. What they cannot do is put text on the table or support it.
+- **Looking in on a committee takes no seat and grants no hands.** An observer reads what
+  the room can read — private drafts excepted, since those belong to their sponsors — and
+  writes nothing.
+- **A whitelist gates entry, not discovery.** Committees stay visible in the directory,
+  marked as closed to you. Hiding their existence would make a conference harder to
+  navigate without making it any more private.
 - **The secretariat sees every committee, and everyone's contact details are visible to
   everyone.** Both follow from what the tool is for. A conference that needs either of them
   narrowed should say so before using this with minors' phone numbers in it.
@@ -259,12 +282,15 @@ POST   /api/auth/login                 { email, join_code }   -> seats you in th
 POST   /api/auth/logout
 GET    /api/auth/me                    the person, their seats, the active one
 PATCH  /api/auth/me                    { delegate_name, phone, country }
-POST   /api/auth/switch                { team_id } — or { committee_id } for the secretariat
+POST   /api/auth/switch                { committee_id } — seats you if you have a seat
+                                       there, otherwise you look in without one
+PATCH  /api/auth/seats/:teamId         { is_primary }  mark a working committee
 
 GET    /api/committees                 every committee, with seats taken and your own
 GET    /api/countries/:name            who speaks for a country, on every committee
 POST   /api/committees                 create a committee and its first delegation
-PATCH  /api/committees/:id             { name, description, total_members }
+PATCH  /api/committees/:id             { name, description, total_members,
+                                         whitelist_enabled, whitelist: [country] }
 POST   /api/teams                      { committee_id | committee_code, country_name }
 POST   /api/teams/join                 { join_code }
 GET    /api/committees/:id             delegations, delegates, codes

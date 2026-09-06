@@ -362,6 +362,17 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .infobar__meta { margin-top: 3px; font-size: 12px; color: var(--ink-2); }
 .infobar__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* The comparison's own controls, where they can be seen and dismissed. */
+.comparebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--rule-strong);
+  background: var(--stock);
+}
+
 /* Delegations asking to be let in as sponsors. */
 .requests {
   margin-top: 12px;
@@ -374,6 +385,39 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .request { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
 .request__note { color: var(--ink-3); font-style: italic; }
 .request .spacer { flex: 1; }
+
+/* An editable list of countries, as removable tags. */
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px 2px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  background: var(--paper);
+  font-size: 12px;
+}
+.chip button {
+  border: 0;
+  background: none;
+  padding: 0 1px;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1;
+}
+.chip button:hover { color: var(--redline); }
+.chip--works {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-color: var(--insert);
+  background: var(--insert-soft);
+  color: var(--insert);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 /* The undertaking a signature is given under. */
 .undertaking {

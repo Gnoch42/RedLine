@@ -3,9 +3,15 @@ import { Card, Stamp, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 
 const firstSponsor = (p) => p.sponsors[0]?.country_name || '';
+// Furthest along first, so what is nearly presentable rises to the top.
+const PHASE = { ready: 0, collecting: 1, active: 2, draft: 3, withdrawn: 4 };
 
 const SORTS = {
   modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
+  status: {
+    label: 'Status',
+    compare: (a, b) => (PHASE[a.status] - PHASE[b.status]) || (a.id - b.id),
+  },
   sponsor: { label: 'Lead sponsor', compare: (a, b) => firstSponsor(a).localeCompare(firstSponsor(b)) },
   support: { label: 'Support', compare: (a, b) => b.support.teams - a.support.teams },
   number: { label: 'Number', compare: (a, b) => a.id - b.id },
@@ -75,13 +81,16 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
                       <span>+{proposition.sponsors.length - 2}</span>
                     )}
                     <span className="spacer" />
-                    {proposition.support.eligible && <span className="stamp stamp--eligible">20%</span>}
+                    {proposition.status === 'ready' && <span className="stamp stamp--eligible">20%</span>}
                     <Stamp status={proposition.status} />
                   </div>
                   {proposition.status !== 'draft' && (
                     <div className="card__foot" style={{ marginTop: 3 }}>
                       <span>
-                        v{proposition.version_count} · {proposition.support.teams}/{proposition.support.total_members} backing
+                        v{proposition.version_count}
+                        {['collecting', 'ready'].includes(proposition.status)
+                          ? ` · ${proposition.support.teams}/${proposition.support.total_members} backing`
+                          : ` · ${proposition.sponsors.length} sponsor(s)`}
                         {proposition.readiness.sponsor_count > 1
                           && proposition.status === 'active'
                           && ` · ${proposition.readiness.ready_count}/${proposition.readiness.sponsor_count} settled`}

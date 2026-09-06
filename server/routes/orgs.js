@@ -3,6 +3,7 @@ import { one, all, run, tx, uniqueCode } from '../db.js';
 import { conflict, denied, missing, int, str } from '../http.js';
 import {
   requireUser, requireCommittee, serializeUser, userFromToken, joinTeam, isSecretariat,
+  mayEnterCommittee,
 } from '../auth.js';
 import { serializeProposition, refreshStatus } from '../model.js';
 
@@ -68,7 +69,7 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
  */
 orgRoutes.get('/committees', requireUser, (req, res) => {
   const committees = all(
-    `SELECT c.id, c.name, c.description, c.total_members, c.created_at,
+    `SELECT c.id, c.name, c.description, c.total_members, c.created_at, c.whitelist_enabled,
             (SELECT COUNT(*) FROM teams t WHERE t.committee_id = c.id) AS registered_teams,
             (SELECT m.team_id FROM memberships m
                JOIN teams t2 ON t2.id = m.team_id
@@ -83,8 +84,14 @@ orgRoutes.get('/committees', requireUser, (req, res) => {
   res.json({
     committees: committees.map((c) => ({
       ...c,
+      whitelist_enabled: !!c.whitelist_enabled,
+      may_enter: mayEnterCommittee(req.user, c.id),
       // What is already spoken for, so the country picker can rule it out.
       taken_countries: taken.filter((t) => t.committee_id === c.id).map((t) => t.country_name),
+      seats_countries: c.whitelist_enabled
+        ? all('SELECT country_name FROM committee_countries WHERE committee_id = ? ORDER BY country_name',
+            c.id).map((r) => r.country_name)
+        : null,
     })),
   });
 });
@@ -104,6 +111,17 @@ orgRoutes.post('/teams', requireUser, (req, res) => {
     : one('SELECT * FROM committees WHERE committee_code = ?',
         str(req.body, 'committee_code', { max: 40 }).toUpperCase());
   if (!cttee) throw missing('That committee no longer exists.');
+
+  if (cttee.whitelist_enabled) {
+    const listed = one(
+      `SELECT 1 AS x FROM committee_countries
+        WHERE committee_id = ? AND lower(country_name) = lower(?)`,
+      cttee.id, countryName
+    );
+    if (!listed) {
+      throw denied(`${cttee.name} seats only the countries on its list, and ${countryName} is not one of them.`);
+    }
+  }
 
   const clash = one(
     'SELECT id FROM teams WHERE committee_id = ? AND lower(country_name) = lower(?)',
@@ -170,9 +188,18 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
       total_members: cttee.total_members,
       committee_code: cttee.committee_code,
       registered_teams: teams.length,
+      whitelist_enabled: !!cttee.whitelist_enabled,
     },
+    whitelist: all(
+      'SELECT country_name FROM committee_countries WHERE committee_id = ? ORDER BY country_name COLLATE NOCASE',
+      cttee.id
+    ).map((r) => r.country_name),
     teams,
     delegates,
+    my_seat: req.user.team_id
+      ? one('SELECT is_primary FROM memberships WHERE user_id = ? AND team_id = ?',
+          req.user.id, req.user.team_id)
+      : null,
   });
 });
 
@@ -187,9 +214,23 @@ orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
   const description = str(req.body, 'description', { required: false, max: 2000 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
   run(
-    'UPDATE committees SET name = ?, description = ?, total_members = ? WHERE id = ?',
-    name, description, totalMembers, req.user.committee_id
+    `UPDATE committees SET name = ?, description = ?, total_members = ?, whitelist_enabled = ?
+      WHERE id = ?`,
+    name, description, totalMembers, req.body?.whitelist_enabled ? 1 : 0, req.user.committee_id
   );
+
+  if (Array.isArray(req.body?.whitelist)) {
+    const wanted = [...new Set(
+      req.body.whitelist.map((c) => (typeof c === 'string' ? c.trim() : '')).filter(Boolean)
+    )].slice(0, 400);
+    tx(() => {
+      run('DELETE FROM committee_countries WHERE committee_id = ?', req.user.committee_id);
+      for (const country of wanted) {
+        run('INSERT OR IGNORE INTO committee_countries (committee_id, country_name) VALUES (?, ?)',
+          req.user.committee_id, country.slice(0, 120));
+      }
+    });
+  }
   // The threshold moved under every proposition here, so some may have crossed
   // it — or fallen back below.
   for (const row of all(
@@ -336,13 +377,26 @@ orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
   const delegations = teams.map((team) => ({
     ...team,
     delegates: all(
-      `SELECT u.id, u.delegate_name, u.email, u.phone, u.role
+      `SELECT u.id, u.delegate_name, u.email, u.phone, u.role, m.is_primary
          FROM memberships m
          JOIN users u ON u.id = m.user_id
         WHERE m.team_id = ?
-        ORDER BY CASE u.role WHEN 'delegate' THEN 0 ELSE 1 END, u.delegate_name`,
+        ORDER BY m.is_primary DESC,
+                 CASE u.role WHEN 'delegate' THEN 0 ELSE 1 END, u.delegate_name`,
       team.team_id
-    ),
+    ).map((delegate) => ({
+      ...delegate,
+      is_primary: !!delegate.is_primary,
+      // Where else this person works, so a delegation can see who to send.
+      also_on: all(
+        `SELECT c.name FROM memberships m2
+           JOIN teams t2 ON t2.id = m2.team_id
+           JOIN committees c ON c.id = t2.committee_id
+          WHERE m2.user_id = ? AND m2.team_id <> ? AND m2.is_primary = 1
+          ORDER BY c.name COLLATE NOCASE`,
+        delegate.id, team.team_id
+      ).map((r) => r.name),
+    })),
     // What this delegation sponsors in that committee.
     propositions: all(
       `SELECT p.id, p.name, p.status

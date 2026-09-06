@@ -1,11 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, Stamp, formatDate } from './bits.jsx';
 import { CountryLink } from './CountryCard.jsx';
 
 const ORDER = { pending: 0, frozen: 1, draft: 2, adopted: 3, detached: 4, withdrawn: 5 };
 
+const SORTS = {
+  status: {
+    label: 'Status',
+    compare: (a, b) => (ORDER[a.status] - ORDER[b.status]) || b.updated_at.localeCompare(a.updated_at),
+  },
+  modified: { label: 'Last modified', compare: (a, b) => b.updated_at.localeCompare(a.updated_at) },
+  approval: {
+    label: 'Approvals',
+    compare: (a, b) => b.approval.approved_count - a.approval.approved_count,
+  },
+  country: {
+    label: 'Proposing country',
+    compare: (a, b) => a.proposing_team.country_name.localeCompare(b.proposing_team.country_name),
+  },
+};
+
 /** Right panel: amendments filed against the proposition currently open. */
 export function AmendmentExplorer({ proposition, amendments, selectedId, onSelect, onNew, canPropose }) {
+  const [sort, setSort] = useState('status');
+
   if (!proposition) {
     return (
       <section className="panel panel--right">
@@ -15,15 +33,20 @@ export function AmendmentExplorer({ proposition, amendments, selectedId, onSelec
     );
   }
 
-  const list = [...(amendments || [])].sort(
-    (a, b) => (ORDER[a.status] - ORDER[b.status]) || (b.updated_at.localeCompare(a.updated_at))
-  );
+  const list = [...(amendments || [])].sort(SORTS[sort].compare);
 
   return (
     <section className="panel panel--right">
       <div className="panel__head">
         <h2>Amendments</h2>
         <div className="sub">to #{proposition.id} {proposition.name}</div>
+        <div className="panel__toolbar">
+          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort amendments">
+            {Object.entries(SORTS).map(([key, { label }]) => (
+              <option key={key} value={key}>Sort: {label}</option>
+            ))}
+          </select>
+        </div>
         <div className="panel__toolbar">
           <button className="btn btn--small btn--block" onClick={onNew} disabled={!canPropose}>
             + Propose an amendment

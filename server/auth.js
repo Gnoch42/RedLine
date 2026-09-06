@@ -7,6 +7,40 @@ export const ROLES = ['delegate', 'faculty', 'secretariat'];
 /** The event's organisers: present everywhere, speaking for no one. */
 export const isSecretariat = (user) => user?.role === 'secretariat';
 
+/**
+ * Only delegates put text on the table. Faculty accompany their delegation and
+ * the secretariat runs the event; both read the drafting floor without writing
+ * to it.
+ */
+export const canDraft = (user) => user?.role === 'delegate';
+
+/**
+ * May this person enter that committee at all? A committee with its whitelist
+ * on seats only the countries on it, and lets only those countries look in —
+ * except the secretariat, who are never shut out, and anyone already holding a
+ * seat there.
+ */
+export function mayEnterCommittee(user, committeeId) {
+  if (isSecretariat(user)) return true;
+  const committee = one('SELECT whitelist_enabled FROM committees WHERE id = ?', committeeId);
+  if (!committee) return false;
+  if (!committee.whitelist_enabled) return true;
+
+  const seated = one(
+    `SELECT 1 AS x FROM memberships m
+       JOIN teams t ON t.id = m.team_id
+      WHERE m.user_id = ? AND t.committee_id = ?`,
+    user.id, committeeId
+  );
+  if (seated) return true;
+
+  return !!one(
+    `SELECT 1 AS x FROM committee_countries
+      WHERE committee_id = ? AND lower(country_name) = lower(?)`,
+    committeeId, user.country || ''
+  );
+}
+
 export function createSession(userId) {
   const token = randomBytes(24).toString('base64url');
   run('INSERT INTO sessions (token, user_id) VALUES (?, ?)', token, userId);
@@ -22,6 +56,16 @@ export function destroySession(token) {
  * the secretariat sits in a committee with no delegation. Both columns are only
  * ever written here, so they cannot drift apart.
  */
+/** A delegate's seat in a given committee, if they hold one. */
+export function seatIn(userId, committeeId) {
+  return one(
+    `SELECT m.team_id FROM memberships m
+       JOIN teams t ON t.id = m.team_id
+      WHERE m.user_id = ? AND t.committee_id = ?`,
+    userId, committeeId
+  )?.team_id ?? null;
+}
+
 export function sit(token, { teamId = null, committeeId = null }) {
   const committee = teamId
     ? one('SELECT committee_id FROM teams WHERE id = ?', teamId)?.committee_id
@@ -52,7 +96,7 @@ export function userFromToken(token) {
             s.active_committee_id AS committee_id,
             t.country_name, t.join_code,
             c.name AS committee_name, c.description AS committee_description,
-            c.total_members, c.committee_code
+            c.total_members, c.committee_code, c.whitelist_enabled
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        LEFT JOIN teams t ON t.id = s.active_team_id
@@ -65,7 +109,7 @@ export function userFromToken(token) {
 /** Every seat this person holds. The secretariat holds none, and needs none. */
 export function seatsOf(userId) {
   return all(
-    `SELECT m.team_id, t.country_name, t.join_code,
+    `SELECT m.team_id, m.is_primary, t.country_name, t.join_code,
             c.id AS committee_id, c.name AS committee_name, c.total_members
        FROM memberships m
        JOIN teams t      ON t.id = m.team_id
@@ -98,23 +142,32 @@ export function requireCommittee(req, res, next) {
     if (!req.user.committee_id) {
       return next(new HttpError(403, 'Open a committee first.'));
     }
+    // Someone looking in without a seat has to still be allowed to: a whitelist
+    // may have gone up since they sat down.
+    if (!req.user.team_id && !mayEnterCommittee(req.user, req.user.committee_id)) {
+      return next(new HttpError(403,
+        'This committee seats only the countries on its list, and yours is not one of them.'));
+    }
     next();
   });
 }
 
 /**
- * Enough to act on the drafting floor. The secretariat observes it and never
- * writes to it: they propose nothing, sponsor nothing and approve nothing.
+ * Enough to act on the drafting floor. Faculty and the secretariat read it and
+ * never write to it: they propose nothing, sponsor nothing and approve nothing.
+ * Nor does anyone looking in without a delegation.
  */
 export function requireDelegation(req, res, next) {
   requireCommittee(req, res, (err) => {
     if (err) return next(err);
-    if (isSecretariat(req.user)) {
+    if (!canDraft(req.user)) {
+      const who = isSecretariat(req.user) ? 'The secretariat' : 'Faculty';
       return next(new HttpError(403,
-        'The secretariat observes the drafting floor — proposing, sponsoring and approving are for delegations.'));
+        `${who} observes the drafting floor — proposing, sponsoring and approving are for delegates.`));
     }
     if (!req.user.team_id) {
-      return next(new HttpError(403, 'Join or create a delegation first.'));
+      return next(new HttpError(403,
+        'You are looking in on this committee without a delegation. Take a seat here to act in it.'));
     }
     next();
   });
@@ -147,7 +200,12 @@ export function serializeUser(user) {
           description: user.committee_description,
           total_members: user.total_members,
           committee_code: user.committee_code,
+          whitelist_enabled: !!user.whitelist_enabled,
         }
       : null,
+    // Reading only: faculty, the secretariat, and anyone looking in on a
+    // committee they hold no seat in.
+    can_draft: canDraft(user) && !!user.team_id,
+    observing: !!user.committee_id && !user.team_id,
   };
 }

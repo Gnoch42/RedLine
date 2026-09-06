@@ -98,7 +98,7 @@ function VersionPicker({ versions, value, onChange, allowCurrent = true, label =
 
 /* ------------------------------------------------------------ info panes */
 
-function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
+function PropositionPane({ proposition, on, hasAmendmentOpen, canAct, note }) {
   const mine = proposition.my_roles;
   const { status, readiness } = proposition;
   const draft = status === 'draft';
@@ -128,9 +128,11 @@ function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
         <>
           <div className="sponsors">
             <SupportList label="Sponsors" teams={proposition.sponsors} />
-            <SupportList label="Signatories" teams={proposition.signatories} />
+            {/* Nothing can be signed until the sponsors close the text, so the
+                signature list and the threshold only appear once it is open. */}
+            {signing && <SupportList label="Signatories" teams={proposition.signatories} />}
           </div>
-          <SupportMeter support={proposition.support} />
+          {signing && <SupportMeter support={proposition.support} />}
           {open && <ReadinessLine readiness={readiness} sponsors={proposition.sponsors} />}
           {signing && (
             <div className="tally__head" style={{ marginTop: 6 }}>
@@ -142,12 +144,7 @@ function PropositionPane({ proposition, on, hasAmendmentOpen, canAct }) {
         </>
       )}
 
-      {!canAct && (
-        <div className="observing">
-          You are here as event secretariat: everything is visible to you, and the drafting —
-          proposing, sponsoring, approving — stays with the delegations.
-        </div>
-      )}
+      {!canAct && <div className="observing">{note}</div>}
 
       <div className="infobar__actions">
         {canAct && draft && mine.sponsor && (
@@ -277,8 +274,19 @@ function AmendmentPane({ amendment, on, onClose, canAct }) {
 
 /* ---------------------------------------------------------------- center */
 
+/** Why this session is reading rather than drafting. */
+function observerNote(user) {
+  if (user.role === 'secretariat') {
+    return 'You are here as event secretariat: everything is visible to you, and the drafting — proposing, sponsoring, approving — stays with the delegations.';
+  }
+  if (user.role === 'faculty') {
+    return 'You are here as faculty: you see everything your delegation sees, including its private drafts. Proposing, sponsoring and approving are for its delegates.';
+  }
+  return 'You are looking in on this committee without a delegation. You can read everything the room can; take a seat here to act in it.';
+}
+
 export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on }) {
-  const canAct = user.role !== 'secretariat';
+  const canAct = user.can_draft;
   const proposition = detail?.proposition;
   const versions = detail?.versions || [];
   const [viewVersionId, setViewVersionId] = useState(null);
@@ -327,6 +335,7 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
           on={on}
           hasAmendmentOpen={!!amendment}
           canAct={canAct}
+          note={observerNote(user)}
         />
         {amendment && (
           <AmendmentPane
@@ -374,40 +383,39 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
           </div>
         </div>
       ) : comparing ? (
-        <div className="docs docs--split">
-          <div className="docs__col docs__col--reference">
-            <Sheet
-              marginalia={<>
-                <VersionPicker
-                  versions={versions}
-                  value={compareFromId}
-                  onChange={setCompareFromId}
-                  allowCurrent={false}
-                  label="Compare from"
-                />
-              </>}
-            >
-              <MarkdownBody content={compareFrom?.markdown_content} />
-            </Sheet>
+        <>
+          <div className="comparebar">
+            <span className="label">Comparing</span>
+            <VersionPicker
+              versions={versions}
+              value={compareFromId}
+              onChange={setCompareFromId}
+              allowCurrent={false}
+              label="from"
+            />
+            <VersionPicker versions={versions} value={viewVersionId} onChange={setViewVersionId} label="to" />
+            <ReadingToggle value={reading} onChange={setReading} />
+            <DiffSummary from={compareFrom?.markdown_content} to={shownContent} />
+            <span style={{ flex: 1 }} />
+            <button className="btn btn--small" onClick={() => setComparing(false)}>
+              ✕ Close comparison
+            </button>
           </div>
-          <div className="docs__col">
-            <Sheet
-              marginalia={<>
-                <VersionPicker versions={versions} value={viewVersionId} onChange={setViewVersionId} label="to" />
-                <ReadingToggle value={reading} onChange={setReading} />
-                <span style={{ flex: 1 }} />
-                <DiffSummary from={compareFrom?.markdown_content} to={shownContent} />
-                <button className="btn btn--ghost btn--small" onClick={() => setComparing(false)}>
-                  Stop comparing
-                </button>
-              </>}
-            >
-              {reading === 'redline'
-                ? <DiffBody from={compareFrom?.markdown_content} to={shownContent} />
-                : <MarkdownBody content={shownContent} />}
-            </Sheet>
+          <div className="docs docs--split">
+            <div className="docs__col docs__col--reference">
+              <Sheet marginalia={<span>Version {compareFrom?.number} — the earlier text</span>}>
+                <MarkdownBody content={compareFrom?.markdown_content} />
+              </Sheet>
+            </div>
+            <div className="docs__col">
+              <Sheet marginalia={<span>Version {shownNumber} — with the changes marked</span>}>
+                {reading === 'redline'
+                  ? <DiffBody from={compareFrom?.markdown_content} to={shownContent} />
+                  : <MarkdownBody content={shownContent} />}
+              </Sheet>
+            </div>
           </div>
-        </div>
+        </>
       ) : (
         <div className="docs">
           <div className="docs__col">

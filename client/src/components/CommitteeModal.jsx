@@ -16,20 +16,30 @@ function Error({ message }) {
  * Committee settings. Nothing here needs a moderator (§5.5) — any delegate
  * seated on the committee can correct what was typed when it was set up.
  */
-function Settings({ committee, onSaved }) {
+function Settings({ committee, data, onSaved }) {
   const [values, setValues] = useState({
     name: committee.name,
     description: committee.description || '',
     total_members: committee.total_members,
   });
+  const [restricted, setRestricted] = useState(!!committee.whitelist_enabled);
+  const [whitelist, setWhitelist] = useState(null);
+  const [adding, setAdding] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
+  // Seed the list from the server once, then keep editing locally until saved.
+  useEffect(() => {
+    if (whitelist === null && data?.whitelist) setWhitelist(data.whitelist);
+  }, [data, whitelist]);
+
+  const touch = () => setSaved(false);
   const set = (key) => (event) => {
     setValues((v) => ({ ...v, [key]: event.target.value }));
-    setSaved(false);
+    touch();
   };
+  const list = whitelist || [];
 
   const save = async () => {
     setBusy(true);
@@ -37,7 +47,12 @@ function Settings({ committee, onSaved }) {
     try {
       await api(`/committees/${committee.id}`, {
         method: 'PATCH',
-        body: { ...values, total_members: Number(values.total_members) },
+        body: {
+          ...values,
+          total_members: Number(values.total_members),
+          whitelist_enabled: restricted,
+          whitelist: list,
+        },
       });
       setSaved(true);
       onSaved();
@@ -49,6 +64,8 @@ function Settings({ committee, onSaved }) {
   };
 
   const seatsChanged = Number(values.total_members) !== committee.total_members;
+  const registered = (data?.teams || []).map((t) => t.country_name);
+  const unlisted = registered.filter((c) => !list.some((x) => x.toLowerCase() === c.toLowerCase()));
 
   return (
     <>
@@ -75,6 +92,78 @@ function Settings({ committee, onSaved }) {
           recalculate support for every proposition on this committee.
         </div>
       )}
+
+      <div className="field">
+        <span className="label">Who may enter</span>
+        <label className="signature-check" style={{ marginTop: 4 }}>
+          <input
+            type="checkbox"
+            checked={restricted}
+            onChange={(e) => { setRestricted(e.target.checked); touch(); }}
+          />
+          <span>
+            Seat only the countries on a list. Everyone else is turned away — including
+            delegates and faculty of countries not on it, who cannot even look in. The event
+            secretariat is never shut out.
+          </span>
+        </label>
+      </div>
+
+      {restricted && (
+        <div className="field">
+          <span className="label">Countries seated here ({list.length})</span>
+          <div className="chips">
+            {list.map((country) => (
+              <span className="chip" key={country}>
+                {country}
+                <button
+                  type="button"
+                  onClick={() => { setWhitelist(list.filter((c) => c !== country)); touch(); }}
+                  aria-label={`Remove ${country}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            {list.length === 0 && (
+              <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>
+                Nobody yet — an empty list turns everyone away.
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'flex-start' }}>
+            <span style={{ flex: 1 }}>
+              <CountrySelect value={adding} onChange={setAdding} taken={list} />
+            </span>
+            <button
+              className="btn"
+              disabled={!adding.trim()}
+              onClick={() => { setWhitelist([...list, adding.trim()].sort()); setAdding(''); touch(); }}
+            >
+              Add
+            </button>
+          </div>
+
+          {unlisted.length > 0 && (
+            <>
+              <div className="notice" style={{ margin: '10px 0' }}>
+                {unlisted.join(', ')} {unlisted.length === 1 ? 'holds a seat' : 'hold seats'} here
+                but {unlisted.length === 1 ? 'is' : 'are'} not on the list. A delegation already
+                registered keeps its access — the list turns away the countries that have not
+                arrived yet.
+              </div>
+              <button
+                className="btn btn--small"
+                onClick={() => { setWhitelist([...list, ...unlisted].sort()); touch(); }}
+              >
+                Add the {unlisted.length} already registered here
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <button className="btn btn--primary" onClick={save} disabled={busy || !values.name.trim()}>
         {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save settings'}
       </button>
@@ -237,7 +326,7 @@ function Codes({ user }) {
 }
 
 /** Your own account: the name and country that follow you between committees. */
-function Account({ user, onSaved }) {
+function Account({ user, seat, onSaved }) {
   const [values, setValues] = useState({
     delegate_name: user.delegate_name,
     phone: user.phone || '',
@@ -300,6 +389,25 @@ function Account({ user, onSaved }) {
           </span>
         </div>
       )}
+      {user.team && (
+        <label className="signature-check" style={{ marginBottom: 14 }}>
+          <input
+            type="checkbox"
+            checked={!!seat?.is_primary}
+            onChange={async (event) => {
+              await api(`/auth/seats/${user.team.id}`, {
+                method: 'PATCH', body: { is_primary: event.target.checked },
+              });
+              onSaved();
+            }}
+          />
+          <span>
+            {user.committee.name} is one of my working committees — shown on the country card so
+            the rest of the conference knows who covers what.
+          </span>
+        </label>
+      )}
+
       <button
         className="btn"
         onClick={save}
@@ -371,7 +479,7 @@ function Delegations({ user, data, onSaved }) {
         </div>
       )}
 
-      <Account user={user} onSaved={onSaved} />
+      <Account user={user} seat={data?.my_seat} onSaved={onSaved} />
     </>
   );
 }
@@ -402,7 +510,7 @@ export function CommitteeModal({ user, onClose, onChanged, initialTab = 'codes' 
       </div>
       {tab === 'codes' && <Codes user={user} />}
       {tab === 'agenda' && <Agenda committee={user.committee} onChanged={onChanged} />}
-      {tab === 'settings' && <Settings committee={user.committee} onSaved={onChanged} />}
+      {tab === 'settings' && <Settings committee={user.committee} data={data} onSaved={onChanged} />}
       {tab === 'delegations' && <Delegations user={user} data={data} onSaved={onChanged} />}
     </Modal>
   );
