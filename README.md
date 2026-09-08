@@ -156,8 +156,20 @@ draft ──submit──> open ──every sponsor calls it settled──> signi
   other pending amendment written against the version it superseded is frozen and flagged.
   Its authors reapply it to the current version by hand; prior approvals are cleared,
   because sponsors approved a different text.
-- **Detaching** takes an amendment out of the proposition and files it as a standalone
-  proposition of its own, seeded at version 1 and sponsored by the delegation that wrote it.
+- **An amendment can itself be amended, once.** A delegation that would rather an amendment
+  said something else proposes a **sub-amendment**: the whole text as it would have it, shown
+  redlined against the amendment it answers. It needs one approval and one only — from the
+  delegation whose amendment it rewords, since that text is theirs and nobody else's yet.
+  Accepted, the amendment takes on the new wording, and the sponsors' approvals of it are
+  cleared, because they had been asked about different words. Rival sub-amendments of the
+  same amendment freeze, as rival amendments do.
+- **There are no sub-sub-amendments.** One level is where a committee is still arguing about
+  a text rather than about arguments about a text.
+- **Detaching** takes something out to stand on its own: an amendment becomes a standalone
+  proposition, seeded at version 1 and sponsored by the delegation that wrote it; a
+  sub-amendment steps up to become an amendment in its own right, put to the sponsors instead
+  of to the delegation it was answering. It is the way out when a sub-amendment is left
+  stranded — its parent adopted, withdrawn or detached — and there is nothing left to reword.
 - **The sponsors close the text together.** Each declares it settled — *ready to collect
   signatories* — which is only offered while no amendment is still in front of them. When
   the last one does, the proposition moves to **signing**. Any sponsor taking that back
@@ -302,7 +314,14 @@ Places where the build spec was silent, or where the implementation makes a call
 - **A sponsor cannot also sign.** They already carry the text; counting them twice would
   say nothing.
 - **Readiness is blocked by pending amendments only, not frozen ones.** A frozen amendment
-  needs its author to act, and should not be able to hold a proposition hostage.
+  needs its author to act, and should not be able to hold a proposition hostage. Pending
+  sub-amendments block it too: the text is still in play.
+- **A sub-amendment needs one approval, not the sponsors'.** It rewords a delegation's own
+  amendment, which has not yet become anyone else's text; the sponsors have their say when
+  the amendment itself comes to them, on whatever it ends up saying.
+- **Accepting a sub-amendment clears the sponsors' approvals of its parent.** They approved
+  particular words. Carrying those approvals across would put a text in front of the
+  committee that nobody had agreed to.
 - **An amendment to a proposition with no sponsors cannot be approved.** "Every sponsor has
   approved" is vacuously true when there are none. Since writing a proposition now makes you
   its sponsor, this should be unreachable — the guard stays anyway.
@@ -387,13 +406,15 @@ GET    /api/propositions/:id/versions
 GET    /api/propositions/:id/versions/:versionId
 GET    /api/propositions/:id/versions/diff?from=&to=
 
-GET    /api/propositions/:id/amendments
-POST   /api/propositions/:id/amendments { name, content, cosponsor_team_ids }
-GET    /api/amendments/:id
+GET    /api/propositions/:id/amendments   amendments and their sub-amendments
+POST   /api/propositions/:id/amendments   { name, content, cosponsor_team_ids }
+POST   /api/amendments/:id/sub-amendments { name, content }  one level only
+GET    /api/amendments/:id                with the text it answers
 PATCH  /api/amendments/:id             edit a draft
 PATCH  /api/amendments/:id/submit      draft -> pending (or frozen, if stale)
 POST   /api/amendments/:id/approve     one sponsor's approval; adopts on the last one
-POST   /api/amendments/:id/detach      -> a standalone proposition
+POST   /api/amendments/:id/detach      -> a proposition, or for a sub-amendment,
+                                         an amendment of its own
 POST   /api/amendments/:id/reapply     { content }  rebase a frozen amendment
 POST   /api/amendments/:id/withdraw
 ```

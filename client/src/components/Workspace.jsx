@@ -228,6 +228,13 @@ function AmendmentPane({ amendment, on, onClose, canAct }) {
           ✕
         </button>
       </div>
+      {amendment.is_sub && amendment.parent && (
+        <div className="infobar__meta">
+          A rewording of <CountryLink name={amendment.parent.country_name} />’s amendment
+          “{amendment.parent.name}”. It replaces that text if — and only if —{' '}
+          {amendment.parent.country_name} accepts it.
+        </div>
+      )}
       <div className="infobar__meta">
         Proposed by <CountryLink name={amendment.proposing_team.country_name} />
         {amendment.cosponsors.length > 0 && (
@@ -249,7 +256,12 @@ function AmendmentPane({ amendment, on, onClose, canAct }) {
 
       <div className="infobar__actions">
         {canAct && amendment.can_approve && (
-          <button className="btn btn--redline" onClick={on.approve}>Approve this amendment</button>
+          <button className="btn btn--redline" onClick={on.approve}>
+            {amendment.is_sub ? 'Accept this wording' : 'Approve this amendment'}
+          </button>
+        )}
+        {canAct && amendment.status === 'pending' && !amendment.is_sub && (
+          <button className="btn" onClick={on.newSubAmendment}>Amend this amendment</button>
         )}
         {amendment.my_approval && <span className="stamp stamp--adopted">you approved</span>}
         {canAct && amendment.status === 'draft' && amendment.is_own_team && (
@@ -263,7 +275,9 @@ function AmendmentPane({ amendment, on, onClose, canAct }) {
         )}
         {canAct && ['pending', 'frozen', 'draft'].includes(amendment.status) && amendment.is_own_team && (
           <>
-            <button className="btn" onClick={on.detach}>Detach as its own proposition</button>
+            <button className="btn" onClick={on.detach}>
+              {amendment.is_sub ? 'Detach as its own amendment' : 'Detach as its own proposition'}
+            </button>
             <button className="btn btn--ghost btn--small" onClick={on.withdrawAmendment}>Withdraw</button>
           </>
         )}
@@ -318,6 +332,9 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
 
   const amendment = amendmentDetail?.amendment;
   const baseVersion = amendmentDetail?.base_version;
+  // An amendment answers a version of the proposition; a sub-amendment answers
+  // the amendment above it.
+  const against = amendmentDetail?.against;
   const currentContent = proposition.current_version?.markdown_content || '';
   const shownContent = viewed ? viewed.markdown_content : currentContent;
   const shownNumber = viewed ? viewed.number : proposition.current_version?.number;
@@ -352,14 +369,27 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
           <div className="docs__col docs__col--reference">
             <Sheet
               marginalia={<>
-                <span>Version {baseVersion?.number} — the text this amendment answers</span>
+                <span>
+                  {against?.kind === 'amendment'
+                    ? `“${against.name}” — the amendment this rewords`
+                    : `Version ${baseVersion?.number} — the text this amendment answers`}
+                </span>
               </>}
             >
-              <MarkdownBody content={baseVersion?.markdown_content} />
+              <MarkdownBody content={against?.markdown_content ?? baseVersion?.markdown_content} />
             </Sheet>
           </div>
           <div className="docs__col">
-            {amendment.status === 'frozen' && (
+            {amendment.status === 'frozen' && amendment.is_sub && (
+              <div className="frozen-banner">
+                <strong>This sub-amendment is frozen.</strong>
+                The amendment it was rewording has moved on or left the table. Nothing is merged
+                automatically: {amendment.is_own_team
+                  ? 'reword it again if that amendment is still in play, or detach it to put it to the sponsors on its own.'
+                  : 'its authors must reword or detach it.'}
+              </div>
+            )}
+            {amendment.status === 'frozen' && !amendment.is_sub && (
               <div className="frozen-banner">
                 <strong>This amendment is frozen.</strong>
                 The proposition has moved on since version {amendment.base_version.number} — it is
@@ -369,7 +399,14 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
                   : 'its authors must reapply it to the current version.'}
               </div>
             )}
-            {amendment.status === 'adopted' && (
+            {amendment.status === 'adopted' && amendment.is_sub && (
+              <div className="adopted-banner">
+                <strong>This wording was accepted.</strong>
+                {' '}{amendment.parent?.country_name} took it on, so “{amendment.parent?.name}”
+                now reads as below and goes back to the sponsors for their approval afresh.
+              </div>
+            )}
+            {amendment.status === 'adopted' && !amendment.is_sub && (
               <div className="adopted-banner">
                 <strong>This amendment was adopted.</strong>
                 Every sponsor approved it, and it became version{' '}
@@ -393,11 +430,17 @@ export function Workspace({ user, detail, amendmentDetail, onClearAmendment, on 
               marginalia={<>
                 <ReadingToggle value={reading} onChange={setReading} />
                 <span style={{ flex: 1 }} />
-                <DiffSummary from={baseVersion?.markdown_content} to={amendment.markdown_content} />
+                <DiffSummary
+                  from={against?.markdown_content ?? baseVersion?.markdown_content}
+                  to={amendment.markdown_content}
+                />
               </>}
             >
               {reading === 'redline'
-                ? <DiffBody from={baseVersion?.markdown_content} to={amendment.markdown_content} />
+                ? <DiffBody
+                    from={against?.markdown_content ?? baseVersion?.markdown_content}
+                    to={amendment.markdown_content}
+                  />
                 : <MarkdownBody content={amendment.markdown_content} />}
             </Sheet>
           </div>

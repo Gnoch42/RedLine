@@ -292,10 +292,23 @@ export function serializeProposition(prop, user, { includeContent = false } = {}
 
 /**
  * §5.2.4 — an amendment needs every current sponsor of the target proposition.
- * Its own co-sponsors are just its authors and carry no approval weight.
+ * A sub-amendment needs only the delegation whose amendment it rewords: it is
+ * their text, and nobody else's yet. In both cases the amendment's own
+ * co-sponsors are just its authors and carry no approval weight.
  */
 export function amendmentApprovalState(amendment, prop) {
-  const required = approvalsFor('proposition', prop.id, 'sponsor');
+  const required = amendment.parent_amendment_id
+    ? (() => {
+        const parent = one(
+          `SELECT a.proposing_team_id AS team_id, t.country_name
+             FROM amendments a JOIN teams t ON t.id = a.proposing_team_id
+            WHERE a.id = ?`,
+          amendment.parent_amendment_id
+        );
+        return parent ? [parent] : [];
+      })()
+    : approvalsFor('proposition', prop.id, 'sponsor');
+
   const given = approvalsFor('amendment', amendment.id, 'amendment_approval');
   const givenIds = new Set(given.map((g) => g.team_id));
   return {
@@ -306,6 +319,41 @@ export function amendmentApprovalState(amendment, prop) {
     // vacuously-satisfied condition would be wrong.
     complete: required.length > 0 && required.every((r) => givenIds.has(r.team_id)),
   };
+}
+
+/**
+ * A sub-amendment carried: the parent takes on its wording. Anything that had
+ * been said about the parent's old text stops applying — the sponsors approved
+ * something else, and the other sub-amendments were written against it.
+ */
+export function adoptSubAmendment(sub, parent) {
+  run(
+    `UPDATE amendments
+        SET markdown_content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ?`,
+    sub.markdown_content, parent.id
+  );
+  run(
+    `UPDATE amendments SET status = 'adopted', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ?`,
+    sub.id
+  );
+  run(
+    `DELETE FROM approvals
+      WHERE target_type = 'amendment' AND target_id = ? AND kind = 'amendment_approval'`,
+    parent.id
+  );
+  freezeSubAmendments(parent.id, sub.id);
+}
+
+/** Sub-amendments of an amendment whose text or standing has just moved. */
+export function freezeSubAmendments(parentId, exceptId = null) {
+  run(
+    `UPDATE amendments
+        SET status = 'frozen', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE parent_amendment_id = ? AND status = 'pending' AND id <> ?`,
+    parentId, exceptId ?? -1
+  );
 }
 
 export function serializeAmendment(amendment, prop, user, { includeContent = false } = {}) {
@@ -333,9 +381,26 @@ export function serializeAmendment(amendment, prop, user, { includeContent = fal
       id: amendment.base_version_id,
       number: versionNumber(amendment.base_version_id),
     },
+    parent_amendment_id: amendment.parent_amendment_id,
+    is_sub: !!amendment.parent_amendment_id,
+    parent: amendment.parent_amendment_id
+      ? one(
+          `SELECT a.id, a.name, a.status, a.proposing_team_id, t.country_name
+             FROM amendments a JOIN teams t ON t.id = a.proposing_team_id
+            WHERE a.id = ?`,
+          amendment.parent_amendment_id
+        )
+      : null,
+    sub_amendment_count: amendment.parent_amendment_id ? 0 : one(
+      `SELECT COUNT(*) AS n FROM amendments
+        WHERE parent_amendment_id = ?
+          AND (status <> 'draft' OR proposing_team_id = ?)`,
+      amendment.id, user.team_id ?? -1
+    ).n,
     // Adoption writes a version whose parent is the one it was based on, so an
-    // adopted amendment can say which version it became.
-    resulting_version_number: amendment.status === 'adopted'
+    // adopted amendment can say which version it became. A sub-amendment
+    // becomes no version: it rewords the amendment above it.
+    resulting_version_number: amendment.status === 'adopted' && !amendment.parent_amendment_id
       ? versionNumber(one(
           'SELECT id FROM versions WHERE proposition_id = ? AND parent_version_id = ?',
           amendment.proposition_id, amendment.base_version_id
@@ -409,7 +474,8 @@ export function adoptAmendment(amendment, prop) {
 export function settlePendingAmendments(propositionId) {
   const pending = all(
     `SELECT * FROM amendments
-      WHERE proposition_id = ? AND status = 'pending' ORDER BY id ASC`,
+      WHERE proposition_id = ? AND status = 'pending' AND parent_amendment_id IS NULL
+      ORDER BY id ASC`,
     propositionId
   );
   for (const amendment of pending) {

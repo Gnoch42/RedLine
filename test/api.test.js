@@ -495,6 +495,120 @@ test('a rival amendment on the superseded version is frozen, not merged', async 
   });
 });
 
+test('an amendment can itself be amended, once, by the delegation it belongs to', async () => {
+  const base = 'STRONG 1.\n2. Requests reporting by 31 March each year.\n3. Added by a team-mate.';
+  const { amendment } = await api(`/api/propositions/${s.propId}/amendments`, {
+    method: 'POST', token: s.germany.token,
+    body: { name: 'Name a review venue', content: `${base}\n4. Convenes in Geneva.` },
+  });
+  await api(`/api/amendments/${amendment.id}/submit`, { method: 'PATCH', token: s.germany.token });
+
+  // Kenya would rather it said Nairobi, so it rewords Germany's amendment.
+  const { amendment: sub } = await api(`/api/amendments/${amendment.id}/sub-amendments`, {
+    method: 'POST', token: s.kenya.token,
+    body: { name: 'Nairobi rather than Geneva', content: `${base}\n4. Convenes in Nairobi.` },
+  });
+  assert.equal(sub.is_sub, true);
+  assert.equal(sub.parent.id, amendment.id);
+  assert.equal(sub.parent.country_name, 'Germany');
+  // Its base is the parent's: the two go stale together.
+  assert.equal(sub.base_version.number, amendment.base_version.number);
+
+  await api(`/api/amendments/${sub.id}/submit`, { method: 'PATCH', token: s.kenya.token });
+  const { amendment: pending } = await api(`/api/amendments/${sub.id}`, { token: s.france.token });
+  // Not the proposition's sponsors — only the delegation whose text it rewords.
+  assert.equal(pending.approval.required_count, 1);
+  assert.deepEqual(pending.approval.required.map((r) => r.country_name), ['Germany']);
+
+  const wrongHands = await api(`/api/amendments/${sub.id}/approve`, {
+    method: 'POST', token: s.france.token, expect: 409,
+  });
+  assert.match(wrongHands.error, /whose amendment this rewords/);
+
+  // Germany accepts, and its own amendment takes on Kenya's wording.
+  const r = await api(`/api/amendments/${sub.id}/approve`, { method: 'POST', token: s.germany.token });
+  assert.equal(r.adopted, true);
+  assert.equal(r.amendment.status, 'adopted');
+  const { amendment: reworded } = await api(`/api/amendments/${amendment.id}`, {
+    token: s.germany.token,
+  });
+  assert.match(reworded.markdown_content, /Nairobi/);
+  assert.equal(reworded.status, 'pending');
+  // The sponsors had been asked about different words, so their approvals go.
+  assert.equal(reworded.approval.approved_count, 0);
+
+  s.parentAmendmentId = amendment.id;
+});
+
+test('a sub-amendment cannot itself be sub-amended', async () => {
+  const { amendment } = await api(`/api/amendments/${s.parentAmendmentId}/sub-amendments`, {
+    method: 'POST', token: s.india.token,
+    body: { name: 'Third thoughts', content: 'something else entirely' },
+  });
+  // A draft is India's own business, so it has to be on the table before
+  // anyone else can even see it, let alone answer it.
+  await api(`/api/amendments/${amendment.id}/sub-amendments`, {
+    method: 'POST', token: s.brazil.token,
+    body: { name: 'Fourth thoughts', content: 'no' }, expect: 404,
+  });
+  await api(`/api/amendments/${amendment.id}/submit`, { method: 'PATCH', token: s.india.token });
+
+  const refused = await api(`/api/amendments/${amendment.id}/sub-amendments`, {
+    method: 'POST', token: s.brazil.token,
+    body: { name: 'Fourth thoughts', content: 'no' }, expect: 409,
+  });
+  assert.match(refused.error, /already a sub-amendment/);
+  s.indiaSubId = amendment.id;
+});
+
+test('a sub-amendment can be detached to stand as an amendment of its own', async () => {
+  const r = await api(`/api/amendments/${s.indiaSubId}/detach`, {
+    method: 'POST', token: s.india.token,
+  });
+  assert.equal(r.amendment.status, 'detached');
+
+  const standalone = r.detached_amendment;
+  assert.equal(standalone.is_sub, false);
+  assert.equal(standalone.parent, null);
+  assert.equal(standalone.status, 'pending');
+  assert.equal(standalone.proposing_team.country_name, 'India');
+  // Put to the sponsors now, rather than to the delegation it was answering.
+  assert.equal(standalone.approval.required_count, 2);
+  assert.equal(standalone.markdown_content, 'something else entirely');
+
+  await api(`/api/amendments/${standalone.id}/withdraw`, { method: 'POST', token: s.india.token });
+});
+
+test('sub-amendments are left behind when the amendment above them moves', async () => {
+  const parentId = s.parentAmendmentId;
+  const { amendment: sub } = await api(`/api/amendments/${parentId}/sub-amendments`, {
+    method: 'POST', token: s.japan.token,
+    body: { name: 'A quieter clause 4', content: 'quiet' },
+  });
+  await api(`/api/amendments/${sub.id}/submit`, { method: 'PATCH', token: s.japan.token });
+
+  // Germany withdraws the amendment its sub-amendments were answering.
+  await api(`/api/amendments/${parentId}/withdraw`, { method: 'POST', token: s.germany.token });
+
+  const { amendment: stranded } = await api(`/api/amendments/${sub.id}`, { token: s.japan.token });
+  assert.equal(stranded.status, 'frozen');
+
+  // There is nothing left to reword, so reapplying is refused and detaching is
+  // the way out.
+  const refused = await api(`/api/amendments/${sub.id}/reapply`, {
+    method: 'POST', token: s.japan.token, body: { content: 'quieter' }, expect: 409,
+  });
+  assert.match(refused.error, /Detach this/);
+
+  const detached = await api(`/api/amendments/${sub.id}/detach`, {
+    method: 'POST', token: s.japan.token,
+  });
+  assert.equal(detached.detached_amendment.is_sub, false);
+  await api(`/api/amendments/${detached.detached_amendment.id}/withdraw`, {
+    method: 'POST', token: s.japan.token,
+  });
+});
+
 test('a frozen amendment is reapplied by hand, and loses its old approvals', async () => {
   const { proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token });
   const rebased = await api(`/api/amendments/${s.frozenId}/reapply`, {

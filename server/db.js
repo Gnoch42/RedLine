@@ -139,6 +139,10 @@ function migrate() {
     db.exec('ALTER TABLE propositions DROP COLUMN initiating_team_id');
   }
 
+  if (!columnsOf('amendments').includes('parent_amendment_id')) {
+    db.exec('ALTER TABLE amendments ADD COLUMN parent_amendment_id INTEGER REFERENCES amendments(id)');
+  }
+
   // Propositions and amendments are titled, not described.
   for (const table of ['propositions', 'amendments']) {
     if (columnsOf(table).includes('short_description')) {

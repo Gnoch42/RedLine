@@ -208,6 +208,7 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
     ),
 
     newAmendment: () => setModal({ type: 'new-amendment' }),
+    newSubAmendment: () => setModal({ type: 'new-sub-amendment' }),
     editAmendment: () => setModal({ type: 'edit-amendment' }),
     submitAmendment: () => act(
       () => api(`/amendments/${amendment.id}/submit`, { method: 'PATCH' }),
@@ -217,17 +218,28 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
     ),
     approve: () => act(
       () => api(`/amendments/${amendment.id}/approve`, { method: 'POST' }),
-      (res) => res.adopted
-        ? `Adopted. The proposition is now at version ${res.proposition.current_version.number}.`
-        : `Approved. ${res.amendment.approval.approved_count} of ${res.amendment.approval.required_count} sponsors so far.`
+      (res) => {
+        if (!res.adopted) {
+          return `Approved. ${res.amendment.approval.approved_count} of ${res.amendment.approval.required_count} sponsors so far.`;
+        }
+        return res.amendment.is_sub
+          ? 'Accepted. Your amendment now reads as proposed, and goes back to the sponsors afresh.'
+          : `Adopted. The proposition is now at version ${res.proposition.current_version.number}.`;
+      }
     ),
     detach: async () => {
-      if (!window.confirm('Take this amendment out and file it as a proposition of its own?')) return;
+      const sub = amendment.is_sub;
+      if (!window.confirm(sub
+        ? 'Take this out and put it to the sponsors as an amendment of its own?'
+        : 'Take this amendment out and file it as a proposition of its own?')) return;
       const result = await act(
         () => api(`/amendments/${amendment.id}/detach`, { method: 'POST' }),
-        'Detached — it is now a proposition in its own right.'
+        sub
+          ? 'Detached — it is now an amendment in its own right, in front of the sponsors.'
+          : 'Detached — it is now a proposition in its own right.'
       );
-      openProposition(result.proposition.id);
+      if (sub) openAmendment(result.detached_amendment.id);
+      else openProposition(result.proposition.id);
     },
     reapply: () => setModal({ type: 'reapply' }),
     withdrawAmendment: () => {
@@ -413,6 +425,26 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
         />
       )}
 
+      {modal?.type === 'new-sub-amendment' && amendment && (
+        <AmendmentEditor
+          title="Amend this amendment"
+          subtitle={`rewording ${amendment.proposing_team.country_name}’s “${amendment.name}”`}
+          submitLabel="Save draft"
+          base={{ markdown_content: amendment.markdown_content }}
+          baseLabel={`Redline against “${amendment.name}” as it stands`}
+          initial={{ content: amendment.markdown_content }}
+          onClose={() => setModal(null)}
+          onSubmit={async (values) => {
+            const result = await act(
+              () => api(`/amendments/${amendment.id}/sub-amendments`, { method: 'POST', body: values }),
+              `Drafted. Submit it and ${amendment.proposing_team.country_name} decides whether to take it on.`
+            );
+            setModal(null);
+            openAmendment(result.amendment.id);
+          }}
+        />
+      )}
+
       {modal?.type === 'edit-amendment' && amendment && (
         <AmendmentEditor
           title="Edit amendment"
@@ -420,8 +452,12 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
           submitLabel="Save"
           base={{
             number: amendmentDetail.data.base_version.number,
-            markdown_content: amendmentDetail.data.base_version.markdown_content,
+            markdown_content: amendmentDetail.data.against?.markdown_content
+              ?? amendmentDetail.data.base_version.markdown_content,
           }}
+          baseLabel={amendment.is_sub
+            ? `Redline against “${amendment.parent?.name}”`
+            : undefined}
           initial={{ name: amendment.name, content: amendment.markdown_content }}
           onClose={() => setModal(null)}
           onSubmit={async (values) => {
@@ -434,10 +470,17 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
       {modal?.type === 'reapply' && amendment && proposition && (
         <AmendmentEditor
           title={`Reapply "${amendment.name}"`}
-          subtitle={`onto version ${currentVersion?.number}`}
+          subtitle={amendment.is_sub
+            ? `onto “${amendment.parent?.name}”`
+            : `onto version ${currentVersion?.number}`}
           submitLabel="Reapply and reopen for approval"
           showFields={false}
-          base={{ number: currentVersion?.number, markdown_content: currentVersion?.markdown_content }}
+          base={amendment.is_sub
+            ? { markdown_content: amendmentDetail.data?.against?.markdown_content }
+            : { number: currentVersion?.number, markdown_content: currentVersion?.markdown_content }}
+          baseLabel={amendment.is_sub
+            ? `Redline against “${amendment.parent?.name}” as it now stands`
+            : undefined}
           initial={{ name: amendment.name, content: amendment.markdown_content }}
           onClose={() => setModal(null)}
           onSubmit={async (values) => {

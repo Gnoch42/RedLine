@@ -87,7 +87,7 @@ export function PropositionEditor({ title, subtitle, initial, submitLabel, onSub
  * Amendments are written as the full proposed text; the redline beside the
  * editor is what the sponsors will actually be asked to approve.
  */
-export function AmendmentEditor({ title, subtitle, base, initial, submitLabel, onSubmit, onClose, showFields = true }) {
+export function AmendmentEditor({ title, subtitle, base, baseLabel, initial, submitLabel, onSubmit, onClose, showFields = true }) {
   const [values, set] = useForm({
     name: initial?.name || '',
     content: initial?.content ?? base?.markdown_content ?? '',
@@ -142,7 +142,7 @@ export function AmendmentEditor({ title, subtitle, base, initial, submitLabel, o
         </div>
         <div>
           <span className="label" style={{ display: 'block', marginBottom: 5 }}>
-            Redline against version {base?.number}
+            {baseLabel || `Redline against version ${base?.number}`}
           </span>
           <div className="editor-preview">
             <DiffBody from={base?.markdown_content} to={values.content} />

@@ -187,6 +187,17 @@ const main = async () => {
   await call(`/amendments/${pending.id}/submit`, { method: 'PATCH', token: token('India') });
   await call(`/amendments/${pending.id}/approve`, { method: 'POST', token: founder });
 
+  // Japan would rather that conference met somewhere else, so it rewords
+  // India's amendment rather than filing a rival one.
+  const { amendment: sub } = await call(`/amendments/${pending.id}/sub-amendments`, {
+    method: 'POST', token: token('Japan'),
+    body: {
+      name: 'Hold the review conference in Nairobi',
+      content: `${current.current_version.markdown_content}\n4. **Convenes** a review conference in Nairobi in 2028.`,
+    },
+  });
+  await call(`/amendments/${sub.id}/submit`, { method: 'PATCH', token: token('Japan') });
+
   // A second text, further along: closed by its sponsors and already signed
   // past the 20% it needs to be presented.
   const second = (await call(`/projects/${projects[1].id}/propositions`, {

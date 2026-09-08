@@ -274,6 +274,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .card--frozen { border-left-color: var(--frost); }
 .card--adopted { border-left-color: var(--insert); }
 .card--collecting { border-left-color: #b98f2c; }
+/* A sub-amendment sits under the amendment it answers. */
+.card--sub { margin-left: 14px; border-left-style: dotted; }
+.card__branch { color: var(--ink-3); }
 .card--ready { border-left-color: var(--insert); }
 
 .card__top { display: flex; align-items: baseline; gap: 6px; }

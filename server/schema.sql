@@ -151,8 +151,13 @@ CREATE TABLE IF NOT EXISTS versions (
 CREATE TABLE IF NOT EXISTS amendments (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   proposition_id    INTEGER NOT NULL REFERENCES propositions(id) ON DELETE CASCADE,
+  -- Null for an amendment to the proposition; set for a sub-amendment, which
+  -- proposes a different wording of that amendment. One level only: a
+  -- sub-amendment cannot itself be amended.
+  parent_amendment_id INTEGER REFERENCES amendments(id) ON DELETE CASCADE,
   -- The version this amendment was written against. If the proposition moves past
-  -- it, the amendment freezes (§5.3).
+  -- it, the amendment freezes (§5.3). A sub-amendment inherits its parent's, so
+  -- the two go stale together.
   base_version_id   INTEGER NOT NULL REFERENCES versions(id),
   name              TEXT    NOT NULL,
   markdown_content  TEXT    NOT NULL,
@@ -193,6 +198,7 @@ CREATE TABLE IF NOT EXISTS approvals (
 
 CREATE INDEX IF NOT EXISTS idx_versions_prop     ON versions (proposition_id, id);
 CREATE INDEX IF NOT EXISTS idx_amendments_prop   ON amendments (proposition_id);
+CREATE INDEX IF NOT EXISTS idx_amendments_parent ON amendments (parent_amendment_id);
 CREATE INDEX IF NOT EXISTS idx_approvals_target  ON approvals (target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_propositions_proj ON propositions (project_id);
 CREATE INDEX IF NOT EXISTS idx_sponsor_requests   ON sponsor_requests (proposition_id, status);

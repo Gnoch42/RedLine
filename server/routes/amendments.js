@@ -6,6 +6,7 @@ import {
   getProposition, getAmendment, assertPropositionVisible, assertAmendmentVisible,
   serializeAmendment, serializeProposition, amendmentApprovalState, adoptAmendment,
   newVersion, recordApproval, assertOwnTeam, versionNumber, clearReadiness, refreshStatus,
+  adoptSubAmendment, freezeSubAmendments,
 } from '../model.js';
 
 
@@ -71,10 +72,54 @@ amendmentRoutes.post('/propositions/:id/amendments', requireDelegation, (req, re
   });
 });
 
+/**
+ * A sub-amendment: a different wording of an amendment already on the table.
+ * It carries the whole text it would have the proposition read, as an amendment
+ * does, and is diffed against the amendment it answers. One level only — a
+ * sub-amendment cannot itself be amended, or a committee would be arguing about
+ * arguments about arguments.
+ */
+amendmentRoutes.post('/amendments/:id/sub-amendments', requireDelegation, (req, res) => {
+  const parent = assertAmendmentVisible(getAmendment(req.params.id), req.user);
+  const prop = getProposition(parent.proposition_id);
+
+  if (parent.parent_amendment_id) {
+    throw conflict('This is already a sub-amendment. Amend the amendment above it instead.');
+  }
+  if (parent.status !== 'pending') {
+    throw conflict(`Only an amendment still in front of the sponsors can be sub-amended; this one is ${parent.status}.`);
+  }
+  const name = str(req.body, 'name', { max: 200 });
+  const content = str(req.body, 'content', { required: false, max: 200000 });
+
+  const id = tx(() => {
+    const info = run(
+      `INSERT INTO amendments
+         (proposition_id, parent_amendment_id, base_version_id, name, markdown_content,
+          proposing_team_id, author_user_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')`,
+      prop.id, parent.id, parent.base_version_id, name, content,
+      req.user.team_id, req.user.id
+    );
+    const amendmentId = Number(info.lastInsertRowid);
+    setCosponsors(amendmentId, req.body?.cosponsor_team_ids, req.user.committee_id);
+    return amendmentId;
+  });
+
+  res.status(201).json({
+    amendment: serializeAmendment(getAmendment(id), prop, req.user, { includeContent: true }),
+  });
+});
+
 amendmentRoutes.get('/amendments/:id', requireCommittee, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
   const prop = getProposition(amendment.proposition_id);
   const base = one('SELECT * FROM versions WHERE id = ?', amendment.base_version_id);
+  // A sub-amendment answers its parent's text, not the proposition's version.
+  const parent = amendment.parent_amendment_id
+    ? getAmendment(amendment.parent_amendment_id)
+    : null;
+
   res.json({
     amendment: serializeAmendment(amendment, prop, req.user, { includeContent: true }),
     base_version: {
@@ -82,6 +127,13 @@ amendmentRoutes.get('/amendments/:id', requireCommittee, (req, res) => {
       number: versionNumber(base.id),
       markdown_content: base.markdown_content,
     },
+    against: parent
+      ? { kind: 'amendment', name: parent.name, markdown_content: parent.markdown_content }
+      : {
+          kind: 'version',
+          name: `Version ${versionNumber(base.id)}`,
+          markdown_content: base.markdown_content,
+        },
   });
 });
 
@@ -121,7 +173,11 @@ amendmentRoutes.patch('/amendments/:id/submit', requireDelegation, (req, res) =>
   assertOwnTeam(amendment, req.user, "an amendment's");
   if (amendment.status !== 'draft') throw conflict('This amendment has already been submitted.');
 
-  const stale = amendment.base_version_id !== prop.current_version_id;
+  const parent = amendment.parent_amendment_id
+    ? getAmendment(amendment.parent_amendment_id)
+    : null;
+  const stale = amendment.base_version_id !== prop.current_version_id
+    || (parent && parent.status !== 'pending');
   tx(() => {
     run(
       `UPDATE amendments SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -153,22 +209,30 @@ amendmentRoutes.post('/amendments/:id/approve', requireDelegation, (req, res) =>
   if (amendment.status !== 'pending') {
     throw conflict(`This amendment is ${amendment.status} and no longer collecting approvals.`);
   }
+  const parent = amendment.parent_amendment_id
+    ? getAmendment(amendment.parent_amendment_id)
+    : null;
+  if (parent && parent.status !== 'pending') {
+    throw conflict(`The amendment this answers is ${parent.status}, so there is nothing left to reword.`);
+  }
+
   const state = amendmentApprovalState(amendment, prop);
   if (state.required_count === 0) {
     throw conflict('The proposition has no sponsors yet, so nobody can approve amendments to it.');
   }
   if (!state.required.some((r) => r.team_id === req.user.team_id)) {
-    throw conflict('Only sponsors of the target proposition can approve its amendments.');
+    throw conflict(parent
+      ? 'Only the delegation whose amendment this rewords can accept it.'
+      : 'Only sponsors of the target proposition can approve its amendments.');
   }
 
   const adopted = tx(() => {
     recordApproval(req.user.team_id, 'amendment', amendment.id, 'amendment_approval', req.user.id);
     const fresh = getAmendment(amendment.id);
-    if (amendmentApprovalState(fresh, prop).complete) {
-      adoptAmendment(fresh, prop);
-      return true;
-    }
-    return false;
+    if (!amendmentApprovalState(fresh, prop).complete) return false;
+    if (parent) adoptSubAmendment(fresh, parent);
+    else adoptAmendment(fresh, prop);
+    return true;
   });
 
   refreshStatus(prop.id);
@@ -181,8 +245,10 @@ amendmentRoutes.post('/amendments/:id/approve', requireDelegation, (req, res) =>
 });
 
 /**
- * §5.2.6 — give up on approval and take the text out as a rival proposition of
- * its own, seeded at version 1.
+ * §5.2.6 — give up on being accepted and take the text out to stand on its own.
+ * An amendment becomes a rival proposition; a sub-amendment steps up to become
+ * an amendment in its own right, put to the sponsors instead of to the
+ * delegation whose wording it was answering.
  */
 amendmentRoutes.post('/amendments/:id/detach', requireDelegation, (req, res) => {
   const amendment = assertAmendmentVisible(getAmendment(req.params.id), req.user);
@@ -190,6 +256,44 @@ amendmentRoutes.post('/amendments/:id/detach', requireDelegation, (req, res) => 
   assertOwnTeam(amendment, req.user, "an amendment's");
   if (!['pending', 'frozen', 'draft'].includes(amendment.status)) {
     throw conflict(`An ${amendment.status} amendment cannot be detached.`);
+  }
+
+  if (amendment.parent_amendment_id) {
+    if (prop.status !== 'active') {
+      throw conflict('The proposition is not open to amendment, so there is nothing to detach into.');
+    }
+    const stale = amendment.base_version_id !== prop.current_version_id;
+    const newId = tx(() => {
+      const info = run(
+        `INSERT INTO amendments
+           (proposition_id, base_version_id, name, markdown_content,
+            proposing_team_id, author_user_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        prop.id, prop.current_version_id, amendment.name, amendment.markdown_content,
+        amendment.proposing_team_id, amendment.author_user_id,
+        // A draft was never public and stays private; anything already public
+        // goes straight in front of the sponsors.
+        amendment.status === 'draft' ? 'draft' : 'pending'
+      );
+      run(
+        `UPDATE amendments SET status = 'detached',
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
+        amendment.id
+      );
+      if (amendment.status !== 'draft' && !stale) {
+        clearReadiness(prop.id);
+        refreshStatus(prop.id);
+      }
+      return Number(info.lastInsertRowid);
+    });
+
+    return res.json({
+      amendment: serializeAmendment(getAmendment(amendment.id), prop, req.user),
+      detached_amendment: serializeAmendment(
+        getAmendment(newId), getProposition(prop.id), req.user, { includeContent: true }
+      ),
+      proposition: serializeProposition(getProposition(prop.id), req.user, { includeContent: true }),
+    });
   }
 
   const newPropId = tx(() => {
@@ -220,6 +324,8 @@ amendmentRoutes.post('/amendments/:id/detach', requireDelegation, (req, res) => 
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
       amendment.id
     );
+    // Its own sub-amendments have nothing left to reword here.
+    freezeSubAmendments(amendment.id);
     return propositionId;
   });
 
@@ -240,6 +346,12 @@ amendmentRoutes.post('/amendments/:id/reapply', requireDelegation, (req, res) =>
   if (amendment.status !== 'frozen') {
     throw conflict('Only a frozen amendment can be reapplied.');
   }
+  const parent = amendment.parent_amendment_id
+    ? getAmendment(amendment.parent_amendment_id)
+    : null;
+  if (parent && parent.status !== 'pending') {
+    throw conflict(`The amendment this answered is ${parent.status}. Detach this to put it to the sponsors on its own.`);
+  }
   if (prop.status !== 'active') {
     throw conflict('The target proposition is no longer live.');
   }
@@ -256,7 +368,8 @@ amendmentRoutes.post('/amendments/:id/reapply', requireDelegation, (req, res) =>
           SET markdown_content = ?, base_version_id = ?, status = 'pending',
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
         WHERE id = ?`,
-      content, prop.current_version_id, amendment.id
+      // A sub-amendment still answers its parent, against the same version.
+      content, parent ? amendment.base_version_id : prop.current_version_id, amendment.id
     );
     clearReadiness(prop.id);
     refreshStatus(prop.id);
@@ -274,10 +387,14 @@ amendmentRoutes.post('/amendments/:id/withdraw', requireDelegation, (req, res) =
   if (['adopted', 'detached'].includes(amendment.status)) {
     throw conflict(`An ${amendment.status} amendment cannot be withdrawn.`);
   }
-  run(
-    `UPDATE amendments SET status = 'withdrawn',
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-    amendment.id
-  );
+  tx(() => {
+    run(
+      `UPDATE amendments SET status = 'withdrawn',
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
+      amendment.id
+    );
+    freezeSubAmendments(amendment.id);
+    refreshStatus(prop.id);
+  });
   res.json({ amendment: serializeAmendment(getAmendment(amendment.id), prop, req.user) });
 });
