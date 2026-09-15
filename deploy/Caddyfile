@@ -1,0 +1,17 @@
+# Caddy fetches and renews a Let's Encrypt certificate for this name on its own,
+# as long as the domain's DNS points at this server and ports 80 and 443 are
+# open to the internet.
+{$REDLINE_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy app:3000
+
+	header {
+		# Browsers remember to use HTTPS only, even if someone types http://.
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

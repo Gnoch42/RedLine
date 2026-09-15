@@ -17,7 +17,9 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, db: dbPath }));
+// Public on a deployed server, so it says it is alive and nothing about the
+// machine it runs on.
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api', orgRoutes);
 app.use('/api', propositionRoutes);

@@ -2,7 +2,10 @@ services:
   app:
     build: .
     ports:
-      - "${REDLINE_PORT:-3000}:3000"
+      # Reachable from this machine only. On a trusted local network (a venue,
+      # a classroom) you can open it up with REDLINE_BIND=0.0.0.0 — but for a
+      # server on the internet, use deploy/ instead, which puts HTTPS in front.
+      - "${REDLINE_BIND:-127.0.0.1}:${REDLINE_PORT:-3000}:3000"
     volumes:
       # The whole database is one SQLite file in here. To keep it somewhere you
       # can see and copy, swap this for a bind mount: ./data:/data

@@ -45,7 +45,7 @@ async function call(path, { method = 'GET', body, token } = {}) {
 async function preflight() {
   const health = await call('/health');
   if (!health.ok) throw new SeedError(`${BASE} answered, but is not a healthy Redline server.`);
-  console.log(`Seeding ${BASE} (database: ${health.db})`);
+  console.log(`Seeding ${BASE}`);
 }
 
 // One password for the whole worked example; it is a demo, not a deployment.

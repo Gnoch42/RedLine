@@ -19,7 +19,12 @@ docker compose up --build
 
 Then open <http://localhost:3000>. One service, one port; the database is a single SQLite
 file on the `redline-data` volume, so restarts keep the committee's work. Change the port
-with `REDLINE_PORT=8080 docker compose up`.
+with `REDLINE_PORT=8080 docker compose up`. It listens on this machine only; on a trusted
+local network, `REDLINE_BIND=0.0.0.0` opens it up.
+
+**On a server on the internet** — with HTTPS, backups and updates — follow
+**[DEPLOY.md](DEPLOY.md)**. People sign in with passwords, so do not put the plain setup above
+on a public address.
 
 **Locally, without Docker** — needs Node 22.13 or newer (the database driver is Node's
 built-in `node:sqlite`, so there is nothing to compile):
@@ -348,8 +353,10 @@ server/           Express API. routes/ is thin; model.js holds the rules above.
 client/src/       React app. components/ is the three-panel UI, lib/ the diff,
                   Markdown rendering, polling helpers and the country list.
 test/             HTTP-level tests of the business rules.
-scripts/seed.js   The worked example.
+scripts/seed.js   The worked example. Never against a real server.
 scripts/admin.js  Administrators, from the machine that runs the server.
+scripts/backup.js A consistent snapshot of the database, safe while it runs.
+deploy/           Production: the app behind Caddy, which handles HTTPS.
 ```
 
 ### API

@@ -15,7 +15,8 @@
     "start": "node server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "seed": "node scripts/seed.js",
-    "admin": "node scripts/admin.js"
+    "admin": "node scripts/admin.js",
+    "backup": "node scripts/backup.js"
   },
   "dependencies": {
     "express": "^5.1.0"

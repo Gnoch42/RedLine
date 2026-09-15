@@ -1,0 +1,46 @@
+# Redline on a public server, behind HTTPS.
+#
+#   cd deploy
+#   cp .env.example .env      # then set REDLINE_DOMAIN
+#   docker compose up -d --build
+#
+# Two containers. Caddy answers on 80 and 443, obtains and renews the TLS
+# certificate by itself, and passes requests through to the app. The app has no
+# published port at all, so nothing reaches it except through Caddy — passwords
+# never cross the internet in the clear.
+
+services:
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    volumes:
+      # The whole database is one SQLite file in here.
+      - redline-data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      REDLINE_DOMAIN: ${REDLINE_DOMAIN:?Set REDLINE_DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here. Losing this volume means asking Let's Encrypt
+      # again, which it rate-limits — keep it.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  redline-data:
+  caddy-data:
+  caddy-config:
