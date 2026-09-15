@@ -62,6 +62,9 @@ app.listen(port, () => {
   // appoint the first one.
   if (one('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1').n === 0) {
     console.log('\nNo administrator yet. Once you have an account, appoint it with:');
-    console.log('  npm run admin -- grant you@example.org\n');
+    console.log(process.env.REDLINE_DATA_DIR === '/data'
+      // Inside the image: the database is in the container, not beside the code.
+      ? '  docker compose exec app node scripts/admin.js grant you@example.org\n'
+      : '  npm run admin -- grant you@example.org\n');
   }
 });

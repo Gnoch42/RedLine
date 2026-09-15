@@ -10,15 +10,27 @@
  * root of trust here — which is what makes it a safe way to appoint the first
  * administrator without a bootstrap password baked into the image.
  */
-import { db, one, all, run, uniqueCode } from '../server/db.js';
+import { db, dbPath, one, all, run, uniqueCode } from '../server/db.js';
 
 const [command, email] = process.argv.slice(2);
 const address = (email || '').trim().toLowerCase();
 
+// Run on the host of a Docker deployment, this opens a fresh, empty database
+// beside the code instead of the real one inside the container — and every
+// lookup then fails for a reason that has nothing to do with the email.
+const DOCKER_HINT =
+  'If Redline runs in Docker, run this inside the container instead, from deploy/:\n' +
+  '  docker compose exec app node scripts/admin.js ' + process.argv.slice(2).join(' ');
+
 const find = () => {
   const user = one('SELECT * FROM users WHERE lower(email) = ?', address);
   if (!user) {
-    console.error(`No account with the email ${address || '(none given)'}.`);
+    const { n } = one('SELECT COUNT(*) AS n FROM users');
+    console.error(`No account with the email ${address || '(none given)'} in ${dbPath}.`);
+    if (n === 0) {
+      console.error('\nThat database has no accounts at all, so it is almost certainly not the one');
+      console.error('your site is using.\n' + DOCKER_HINT);
+    }
     process.exit(1);
   }
   return user;
