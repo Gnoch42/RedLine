@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { one, all, run } from './db.js';
+import { may } from './config.js';
 import { HttpError } from './http.js';
 
 export const ROLES = ['delegate', 'faculty', 'secretariat'];
@@ -8,11 +9,12 @@ export const ROLES = ['delegate', 'faculty', 'secretariat'];
 export const isSecretariat = (user) => user?.role === 'secretariat';
 
 /**
- * Only delegates put text on the table. Faculty accompany their delegation and
- * the secretariat runs the event; both read the drafting floor without writing
- * to it.
+ * Who puts text on the table. Delegates by default; faculty accompany their
+ * delegation and the secretariat runs the event, so both read the drafting
+ * floor without writing to it. Change `permissions.draft` in the configuration
+ * file to widen that.
  */
-export const canDraft = (user) => user?.role === 'delegate';
+export const canDraft = (user) => may(user, 'draft');
 
 /**
  * May this person look in on that committee? A whitelist on its own only
@@ -127,6 +129,19 @@ function tokenFrom(req) {
   return header.startsWith('Bearer ') ? header.slice(7) : null;
 }
 
+/** A guard for one of the capabilities named in the configuration file. */
+export function requireCapability(capability, what) {
+  return (req, res, next) => {
+    requireUser(req, res, (err) => {
+      if (err) return next(err);
+      if (!may(req.user, capability)) {
+        return next(new HttpError(403, what));
+      }
+      next();
+    });
+  };
+}
+
 /** The keys to the instance: resetting passwords, and appointing more admins. */
 export function requireAdmin(req, res, next) {
   requireUser(req, res, (err) => {
@@ -223,5 +238,10 @@ export function serializeUser(user) {
     // committee they hold no seat in.
     can_draft: canDraft(user) && !!user.team_id,
     observing: !!user.committee_id && !user.team_id,
+    may: {
+      edit_settings: may(user, 'editCommitteeSettings'),
+      edit_agenda: may(user, 'editAgenda'),
+      set_current_topic: may(user, 'setCurrentTopic'),
+    },
   };
 }

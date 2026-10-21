@@ -158,6 +158,13 @@ function PropositionPane({ proposition, on, hasAmendmentOpen, canAct, note }) {
           <button className="btn" onClick={on.newAmendment}>Propose an amendment</button>
         )}
 
+        {/* Enough of the committee is behind it to put it in front of the dais. */}
+        {proposition.support.eligible && (
+          <button className="btn" onClick={on.exportPaper} title="NMUN working paper (.docx)">
+            Export working paper
+          </button>
+        )}
+
         {/* Sponsorship: asked for, granted by the sponsors. */}
         {canAct && !mine.sponsor && !draft && status !== 'withdrawn' && (
           mine.requested

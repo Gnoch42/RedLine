@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Redline \u2014 a MUN negotiation platform for drafting, amending and co-sponsoring resolutions.",
+  "description": "Redline — a MUN negotiation platform for drafting, amending and co-sponsoring resolutions.",
   "engines": {
     "node": ">=22.13"
   },
@@ -19,6 +19,8 @@
     "backup": "node scripts/backup.js"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "docx": "^9.13.0",
+    "express": "^5.1.0",
+    "marked": "^18.1.1"
   }
 }

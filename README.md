@@ -81,7 +81,7 @@ what they are at the conference.
   they read the drafting floor without writing to it.
 - **Secretariat** — the people running the event. They pick no country, hold no delegation,
   and can open any committee to read it. They propose nothing, sponsor nothing and approve
-  nothing, and they never occupy one of the committee's seats, so they cannot move the 20%
+  nothing, and they never occupy one of the committee's seats, so they cannot move the support
   threshold.
 
 Everyone signs in with **their own password**, hashed with scrypt from `node:crypto` — no new
@@ -106,10 +106,10 @@ the secretariat, and it is the keys to the instance rather than standing in a co
 A committee still has a code of its own, and `POST /api/teams` still accepts it, but the
 interface no longer asks anyone for it — the list is the way in.
 
-Everyone seated on a committee can correct its settings afterwards — its name, its
-description, the seat count behind the 20% threshold, and the agenda itself — and your own
-name, country and phone under Committee → Delegations. There is no organiser account and no
-moderator; nothing in the app requires elevated privileges, by design.
+Committee settings — its name, description, the seat count behind the threshold, and the
+whitelist — are an **administrator's** to change, and the agenda is the dais's. Both are
+configurable (see below). Your own name, country and phone are yours, under Committee →
+Delegations.
 
 A committee that seats a fixed roster can turn on a **whitelist** of countries — when it is
 founded, or later under Committee → Settings. Two separate choices:
@@ -187,9 +187,37 @@ draft ──submit──> open ──every sponsor calls it settled──> signi
   stands and must undertake, explicitly, to sign it as it stands before the signature is
   recorded — against that version, so a signature given on an earlier draft is visibly
   marked as such. Sponsors carry a proposition rather than sign it.
-- **20% to present.** Distinct delegations backing a proposition as sponsor and/or signatory,
-  over the seat count fixed when the committee was created. Crossing it turns **signing**
-  into **ready**; signatories keep being added afterwards.
+- **20% to present, by default.** Distinct delegations backing a proposition as sponsor
+  and/or signatory, over the seat count fixed when the committee was created. Crossing it
+  turns **signing** into **ready**, and opens the working paper export; signatories keep being
+  added afterwards. The fraction is `supportThreshold` in the configuration file.
+
+## Configuring it
+
+The first time the server starts it writes a **fully commented configuration file** into the
+data directory — `<data dir>/redline.config.js`, or `/data/redline.config.js` in Docker.
+Because it lives on the mounted volume, a deployment changes it without rebuilding the image.
+Edit it and restart; anything you leave out falls back to the default, and anything it cannot
+make sense of is reported at start-up and replaced by the default rather than taking the
+server down.
+
+What it governs:
+
+- **`supportThreshold`** — how much of a committee has to be behind a working paper before it
+  counts as presentable, and before Redline will export it. 0.2 is the usual NMUN fifth;
+  check your own rules of procedure.
+- **`permissions`** — who may do what, as lists of `'delegate'`, `'faculty'`, `'secretariat'`
+  and `'admin'`. Separate entries for acting on the drafting floor (`draft`), committee
+  settings, the agenda, and marking the topic being debated. Put `'faculty'` in `draft` if you
+  want advisors drafting alongside their delegation.
+- **`contacts.visibility`** — how far email and phone travel: across the whole `'conference'`,
+  only within a `'committee'`, or only inside your own `'delegation'`. The secretariat and
+  administrators always see them, so somebody can reach a participant. Worth narrowing if your
+  conference has minors.
+- **`password`** — minimum length, how many wrong guesses pause an account and for how long,
+  and how long an administrator's reset code stays usable.
+- **`export`** — the opening line of the working paper, and whether to keep the template's
+  "Code:" line and its affirmation.
 
 ## Passwords, and getting back in
 
@@ -217,6 +245,17 @@ Repeated wrong guesses on an account are slowed to a stop for a minute at a time
 created before passwords existed set one by presenting the code they used to sign in with;
 once an account has a password, only a reset code will replace it.
 
+## Submitting a working paper
+
+Once a proposition has the support it needs — the same threshold that makes it *ready* —
+anyone in the committee can **export it as a Word document on the NMUN working paper
+template**: the header block with committee, topic, and sponsors and signatories in
+alphabetical order, then the text itself, with preambular clauses as paragraphs and operative
+clauses numbered 1. / a. / i. The emphasis delegates wrote is kept.
+
+Upload the file to Google Drive and it becomes a Google Doc, which is what NMUN asks you to
+share with your committee's email address.
+
 ## Finding people
 
 Any country name in the interface — on a card, in a sponsor list, beside an amendment —
@@ -237,7 +276,8 @@ middle in two — the version it answers beside the redline — and the ✕ in i
 again, leaving the proposition on its own.
 
 Both explorers filter by status, with a count beside each one, and order what is left by when
-it last moved.
+it last moved. The agenda item the committee is **debating right now** is marked *on the floor*
+and sorted to the top; the dais sets it from Committee → Agenda.
 
 Diffs are computed in the browser over the Markdown source and shown the way a redlined
 draft reads — struck text and inserted text in place. Every redline has a **Clean**
@@ -292,6 +332,13 @@ Places where the build spec was silent, or where the implementation makes a call
 - **Looking in on a committee takes no seat and grants no hands.** An observer reads what
   the room can read — private drafts excepted, since those belong to their sponsors — and
   writes nothing.
+- **Settings and the agenda are not for everyone, but almost everything else still is.** The
+  seat count decides every eligibility figure on a committee, and the agenda decides what can
+  be written at all; both outlast any one delegation's opinion. The drafting floor itself has
+  no moderator and still does not.
+- **The configuration lives on the data volume, not in the image.** A conference should be
+  able to change its own rules without a rebuild, and a bad value should cost a warning at
+  start-up rather than the server.
 - **A whitelist gates the roster, and shutting observers out is a second, separate switch.**
   A committee with a fixed membership is the common case; a committee nobody may watch is
   the rare one, and conflating them would make the common case heavy-handed.
@@ -350,6 +397,9 @@ server/           Express API. routes/ is thin; model.js holds the rules above.
   schema.sql      The whole database, applied at boot.
   db.js           Opens it, and migrates one written by an earlier build.
   passwords.js    scrypt hashing, and what counts as a usable password.
+  config.js       Reads the deployment's settings; config.default.js is the
+                  commented template copied into the data directory.
+  export-nmun.js  Markdown in, NMUN working paper out.
 client/src/       React app. components/ is the three-panel UI, lib/ the diff,
                   Markdown rendering, polling helpers and the country list.
 test/             HTTP-level tests of the business rules.
@@ -387,6 +437,7 @@ POST   /api/teams/join                 { join_code }
 DELETE /api/teams/:id/seat             give up a seat; releases the country if it is free
 GET    /api/committees/:id             delegations, delegates, codes
 GET    /api/committees/:id/board       agenda + propositions, in one poll
+PATCH  /api/committees/:id/current-topic  { project_id }  the item being debated
 GET    /api/committees/:id/projects
 POST   /api/committees/:id/projects    { name }
 PATCH  /api/projects/:id               { name, position }  rename / reorder
@@ -412,6 +463,7 @@ DELETE /api/propositions/:id/support/signatory
 GET    /api/propositions/:id/versions
 GET    /api/propositions/:id/versions/:versionId
 GET    /api/propositions/:id/versions/diff?from=&to=
+GET    /api/propositions/:id/working-paper.docx   on the NMUN template, once eligible
 
 GET    /api/propositions/:id/amendments   amendments and their sub-amendments
 POST   /api/propositions/:id/amendments   { name, content, cosponsor_team_ids }

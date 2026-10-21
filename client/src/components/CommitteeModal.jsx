@@ -17,6 +17,36 @@ function Error({ message }) {
  * Committee settings. Nothing here needs a moderator (§5.5) — any delegate
  * seated on the committee can correct what was typed when it was set up.
  */
+/** What the settings say, for everyone who may not change them. */
+function SettingsReadOnly({ committee, data }) {
+  const whitelist = data?.whitelist || [];
+  return (
+    <>
+      <div className="rows">
+        <div className="row"><strong style={{ flex: 1 }}>Name</strong>{committee.name}</div>
+        <div className="row">
+          <strong style={{ flex: 1 }}>Description</strong>{committee.description || '—'}
+        </div>
+        <div className="row">
+          <strong style={{ flex: 1 }}>Seats</strong>
+          {committee.total_members} — the denominator of the{' '}
+          {Math.round((data?.threshold ?? 0.2) * 100)}% needed to present
+        </div>
+        <div className="row">
+          <strong style={{ flex: 1 }}>Who may sit</strong>
+          {committee.whitelist_enabled
+            ? `${whitelist.length} listed countries${committee.block_observers ? ', others cannot even look in' : ''}`
+            : 'any country'}
+        </div>
+      </div>
+      <p className="lead" style={{ marginTop: 16, fontSize: 13 }}>
+        These change what every delegation sees and how eligibility is counted, so they are an
+        administrator's to set. Ask the organisers if something here is wrong.
+      </p>
+    </>
+  );
+}
+
 function Settings({ committee, data, onSaved }) {
   const [values, setValues] = useState({
     name: committee.name,
@@ -114,7 +144,10 @@ function Settings({ committee, data, onSaved }) {
 }
 
 /** The agenda: add, rename and remove items. */
-function Agenda({ committee, onChanged }) {
+function Agenda({ committee, data, user, onChanged }) {
+  const mayEdit = !!user.may?.edit_agenda;
+  const maySetTopic = !!user.may?.set_current_topic;
+  const onTheFloor = data?.committee?.current_project_id ?? null;
   const [projects, setProjects] = useState(null);
   const [adding, setAdding] = useState('');
   const [error, setError] = useState(null);
@@ -148,6 +181,11 @@ function Agenda({ committee, onChanged }) {
   return (
     <>
       <Error message={error} />
+      {!mayEdit && !maySetTopic && (
+        <p className="lead" style={{ fontSize: 13 }}>
+          The agenda is set by the dais and the organisers.
+        </p>
+      )}
       <div className="rows">
         {(projects || []).map((project, index) => (
           <AgendaRow
@@ -155,6 +193,12 @@ function Agenda({ committee, onChanged }) {
             project={project}
             first={index === 0}
             last={index === projects.length - 1}
+            mayEdit={mayEdit}
+            maySetTopic={maySetTopic}
+            onTheFloor={project.id === onTheFloor}
+            onSetTopic={(on) => run(() => api(`/committees/${committee.id}/current-topic`, {
+              method: 'PATCH', body: { project_id: on ? project.id : null },
+            }))}
             onRename={(name) => run(() => api(`/projects/${project.id}`, { method: 'PATCH', body: { name } }))}
             onMove={(delta) => run(() => api(`/projects/${project.id}`, {
               method: 'PATCH',
@@ -168,21 +212,26 @@ function Agenda({ committee, onChanged }) {
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-        <input
-          value={adding}
-          onChange={(e) => setAdding(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
-          placeholder="New agenda item"
-          style={{ flex: 1, padding: '8px 10px', border: '1px solid var(--rule-strong)', borderRadius: 3, background: 'var(--paper)' }}
-        />
-        <button className="btn btn--primary" onClick={add} disabled={!adding.trim()}>Add</button>
-      </div>
+      {mayEdit && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <input
+            value={adding}
+            onChange={(e) => setAdding(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
+            placeholder="New agenda item"
+            style={{ flex: 1, padding: '8px 10px', border: '1px solid var(--rule-strong)', borderRadius: 3, background: 'var(--paper)' }}
+          />
+          <button className="btn btn--primary" onClick={add} disabled={!adding.trim()}>Add</button>
+        </div>
+      )}
     </>
   );
 }
 
-function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
+function AgendaRow({
+  project, first, last, mayEdit, maySetTopic, onTheFloor, onSetTopic,
+  onRename, onMove, onDelete,
+}) {
   const [name, setName] = useState(project.name);
   const [editing, setEditing] = useState(false);
 
@@ -208,7 +257,7 @@ function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
           }}
           style={{ flex: 1, padding: '3px 6px', border: '1px solid var(--redline)', borderRadius: 3 }}
         />
-      ) : (
+      ) : mayEdit ? (
         <button
           className="btn btn--ghost btn--small"
           style={{ flex: 1, justifyContent: 'flex-start', fontWeight: 600 }}
@@ -216,21 +265,39 @@ function AgendaRow({ project, first, last, onRename, onMove, onDelete }) {
         >
           {project.name}
         </button>
+      ) : (
+        <strong style={{ flex: 1 }}>{project.name}</strong>
       )}
+
+      {onTheFloor && <span className="stamp stamp--floor">on the floor</span>}
+      {maySetTopic && (
+        <button
+          className={`btn btn--small${onTheFloor ? '' : ' btn--ghost'}`}
+          onClick={() => onSetTopic(!onTheFloor)}
+          title={onTheFloor ? 'Stop marking this as the item being debated' : 'Mark as the item being debated'}
+        >
+          {onTheFloor ? 'Off the floor' : 'On the floor'}
+        </button>
+      )}
+
       <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
         {project.proposition_count} proposition(s)
       </span>
-      <button className="btn btn--ghost btn--small" onClick={() => onMove(-1)} disabled={first} title="Move up">↑</button>
-      <button className="btn btn--ghost btn--small" onClick={() => onMove(1)} disabled={last} title="Move down">↓</button>
-      <button
-        className="btn btn--ghost btn--small"
-        onClick={() => {
-          if (window.confirm(`Remove "${project.name}" from the agenda?`)) onDelete();
-        }}
-        title="Remove"
-      >
-        ✕
-      </button>
+      {mayEdit && (
+        <>
+          <button className="btn btn--ghost btn--small" onClick={() => onMove(-1)} disabled={first} title="Move up">↑</button>
+          <button className="btn btn--ghost btn--small" onClick={() => onMove(1)} disabled={last} title="Move down">↓</button>
+          <button
+            className="btn btn--ghost btn--small"
+            onClick={() => {
+              if (window.confirm(`Remove "${project.name}" from the agenda?`)) onDelete();
+            }}
+            title="Remove"
+          >
+            ✕
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -483,8 +550,14 @@ function Delegations({ user, data, onSaved, onLeave }) {
                     <span className="label" style={{ marginLeft: 6 }}>{delegate.role}</span>
                   )}
                   <span className="person__contact">
-                    <a href={`mailto:${delegate.email}`}>{delegate.email}</a>
-                    {delegate.phone && <>{' · '}{delegate.phone}</>}
+                    {delegate.contacts_withheld
+                      ? <em>contact details not shared with you</em>
+                      : (
+                        <>
+                          <a href={`mailto:${delegate.email}`}>{delegate.email}</a>
+                          {delegate.phone && <>{' · '}{delegate.phone}</>}
+                        </>
+                      )}
                   </span>
                 </span>
               </div>
@@ -550,8 +623,12 @@ export function CommitteeModal({ user, onClose, onChanged, onLeave, initialTab =
         ))}
       </div>
       {tab === 'codes' && <Codes user={user} />}
-      {tab === 'agenda' && <Agenda committee={user.committee} onChanged={changed} />}
-      {tab === 'settings' && <Settings committee={user.committee} data={data} onSaved={changed} />}
+      {tab === 'agenda' && (
+        <Agenda committee={user.committee} data={data} user={user} onChanged={changed} />
+      )}
+      {tab === 'settings' && (user.may?.edit_settings
+        ? <Settings committee={user.committee} data={data} onSaved={changed} />
+        : <SettingsReadOnly committee={user.committee} data={data} />)}
       {tab === 'delegations' && (
         <Delegations user={user} data={data} onSaved={changed} onLeave={onLeave} />
       )}

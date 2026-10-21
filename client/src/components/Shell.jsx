@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from '../api.js';
+import { api, download } from '../api.js';
 import { usePoll } from '../lib/usePoll.js';
 import { Wordmark, Toast } from './bits.jsx';
 import { CommitteeModal } from './CommitteeModal.jsx';
@@ -206,6 +206,15 @@ export function Shell({ user, onSignOut, onUserChange, onAddSeat }) {
       () => api(`/propositions/${proposition.id}/support/signatory`, { method: 'DELETE' }),
       'Signature withdrawn.'
     ),
+
+    exportPaper: async () => {
+      try {
+        const name = await download(`/propositions/${proposition.id}/working-paper.docx`);
+        say(`Downloaded ${name}. Upload it to Google Drive to share it with the dais.`);
+      } catch (err) {
+        say(err.message, 'error');
+      }
+    },
 
     newAmendment: () => setModal({ type: 'new-amendment' }),
     newSubAmendment: () => setModal({ type: 'new-sub-amendment' }),

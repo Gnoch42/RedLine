@@ -131,6 +131,14 @@ const main = async () => {
   });
 
   const { projects } = await call(`/committees/${fr.committee.id}/projects`, { token: founder });
+  // The dais marks what the committee is debating; it acts in the room it is
+  // looking at, so it opens the committee first.
+  await call('/auth/switch', {
+    method: 'POST', token: staffToken, body: { committee_id: fr.committee.id },
+  });
+  await call(`/committees/${fr.committee.id}/current-topic`, {
+    method: 'PATCH', token: staffToken, body: { project_id: projects[0].id },
+  });
   const project = projects[0];
 
   const { proposition } = await call(`/projects/${project.id}/propositions`, {
@@ -238,7 +246,8 @@ const main = async () => {
   }
   console.log(line(`roy.${stamp}@example.org`, 'France — faculty advisor'));
   console.log(line(staff.email, 'Secretariat — reads every committee'));
-  console.log('\nTo try the administration panel, appoint one from this machine:');
+  console.log('\nTo try the administration panel — and the committee settings, which are an');
+  console.log('administrator\'s to change — appoint one from this machine:');
   console.log(`  npm run admin -- grant ${fr.email}`);
   console.log(`\nOpen ${BASE}\n`);
 };

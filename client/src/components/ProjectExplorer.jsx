@@ -17,6 +17,7 @@ const byModified = (a, b) => b.updated_at.localeCompare(a.updated_at);
 export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewProposition, onNewProject, onOpenSettings, canAct = true }) {
   const [status, setStatus] = useState('all');
   const projects = board?.projects || [];
+  const onTheFloor = board?.current_project_id ?? null;
 
   const counts = {};
   for (const project of projects) {
@@ -54,7 +55,10 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
           </div>
         )}
 
-        {projects.map((project) => {
+        {[...projects]
+          // Whatever is being debated belongs at the top of the list.
+          .sort((a, b) => (b.id === onTheFloor ? 1 : 0) - (a.id === onTheFloor ? 1 : 0))
+          .map((project) => {
           const propositions = project.propositions
             .filter((p) => status === 'all' || p.status === status)
             .sort(byModified);
@@ -63,6 +67,11 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
             <div className="project" key={project.id}>
               <div className="project__head">
                 <span className="project__name">{project.name}</span>
+                {project.id === onTheFloor && (
+                  <span className="stamp stamp--floor" title="The committee is debating this now">
+                    on the floor
+                  </span>
+                )}
                 <span className="project__count">{propositions.length}</span>
               </div>
 

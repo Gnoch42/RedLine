@@ -87,13 +87,19 @@ function CountryModal({ country, onClose }) {
                       </span>
                     )}
                     <span className="person__contact">
-                      <a href={`mailto:${person.email}`} onClick={(e) => e.stopPropagation()}>
-                        {person.email}
-                      </a>
-                      {person.phone && (
+                      {person.contacts_withheld ? (
+                        <em>contact details not shared with you</em>
+                      ) : (
                         <>
-                          {' · '}
-                          <a href={`tel:${person.phone.replace(/[^\d+]/g, '')}`}>{person.phone}</a>
+                          <a href={`mailto:${person.email}`} onClick={(e) => e.stopPropagation()}>
+                            {person.email}
+                          </a>
+                          {person.phone && (
+                            <>
+                              {' · '}
+                              <a href={`tel:${person.phone.replace(/[^\d+]/g, '')}`}>{person.phone}</a>
+                            </>
+                          )}
                         </>
                       )}
                     </span>

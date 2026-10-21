@@ -135,6 +135,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .stamp--detached { color: var(--frost); }
 .stamp--withdrawn { color: var(--ink-3); text-decoration: line-through; }
 .stamp--eligible { color: var(--insert); background: var(--insert-soft); }
+/* The agenda item the committee is debating right now. */
+.stamp--floor {
+  color: var(--redline);
+  background: var(--redline-soft);
+  border-color: var(--redline);
+}
 
 /* -------------------------------------------------------------- app shell */
 

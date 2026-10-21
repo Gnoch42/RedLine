@@ -5,6 +5,7 @@ import {
   requireUser, requireCommittee, serializeUser, userFromToken, joinTeam, isSecretariat,
   mayEnterCommittee, sit,
 } from '../auth.js';
+import { config, may, maySeeContacts } from '../config.js';
 
 /**
  * A delegate represents one country, chosen on their account. A delegation is
@@ -37,6 +38,18 @@ function setRoster(committeeId, body) {
     run('INSERT OR IGNORE INTO committee_countries (committee_id, country_name) VALUES (?, ?)',
       committeeId, country.slice(0, 120));
   }
+}
+
+/**
+ * Contact details travel as far as `contacts.visibility` says, and no further.
+ * Withheld details are absent rather than blanked, so the interface can say so
+ * rather than show an empty line.
+ */
+function withContacts(people, viewer, where) {
+  const allowed = maySeeContacts(viewer, where);
+  return people.map(({ email, phone, ...rest }) => (
+    allowed ? { ...rest, email, phone } : { ...rest, contacts_withheld: true }
+  ));
 }
 
 function assertMember(user, committeeId) {
@@ -206,15 +219,17 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
        FROM teams t WHERE t.committee_id = ? ORDER BY t.country_name`,
     cttee.id
   );
-  const delegates = req.user.team_id ? all(
+  const delegates = req.user.team_id ? withContacts(all(
     `SELECT u.id, u.email, u.delegate_name, u.phone, u.role, u.country
        FROM memberships m
        JOIN users u ON u.id = m.user_id
       WHERE m.team_id = ? ORDER BY u.delegate_name`,
     req.user.team_id
-  ) : [];
+  ), req.user, { committeeId: cttee.id, teamId: req.user.team_id }) : [];
   // Event staff belong to no committee in particular, so they are listed for
   // every one — the point of having them here is being able to reach them.
+  // The people running the event are reachable by everyone, whatever the
+  // setting: that is the point of listing them.
   const secretariat = all(
     `SELECT id, email, delegate_name, phone FROM users
       WHERE role = 'secretariat' ORDER BY delegate_name`
@@ -230,7 +245,11 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
       registered_teams: teams.length,
       whitelist_enabled: !!cttee.whitelist_enabled,
       block_observers: !!cttee.block_observers,
+      current_project_id: cttee.current_project_id,
     },
+    // What this installation asks of a proposition before it can be presented.
+    // Permissions travel on the signed-in user, not per committee.
+    threshold: config.supportThreshold,
     whitelist: all(
       'SELECT country_name FROM committee_countries WHERE committee_id = ? ORDER BY country_name COLLATE NOCASE',
       cttee.id
@@ -245,12 +264,16 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
 });
 
 /**
- * Committee settings. There is no moderator (§5.5), so any delegate seated here
- * may correct them — including the seat count, which is the denominator of the
- * 20% threshold and so changes every eligibility figure at once.
+ * Committee settings — the name, the seat count behind the threshold, and the
+ * whitelist. They change what every delegation sees and how eligibility is
+ * counted, so who may touch them is `permissions.editCommitteeSettings` in the
+ * configuration file; administrators only, by default.
  */
 orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
+  if (!may(req.user, 'editCommitteeSettings')) {
+    throw denied('Committee settings are for administrators of this installation.');
+  }
   const name = str(req.body, 'name', { max: 120 });
   const description = str(req.body, 'description', { required: false, max: 2000 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
@@ -286,6 +309,7 @@ orgRoutes.get('/committees/:id/projects', requireCommittee, (req, res) => {
 
 orgRoutes.post('/committees/:id/projects', requireCommittee, (req, res) => {
   assertMember(req.user, req.params.id);
+  assertMayEditAgenda(req.user);
   const name = str(req.body, 'name', { max: 200 });
   const next = one(
     'SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM projects WHERE committee_id = ?',
@@ -301,6 +325,12 @@ orgRoutes.post('/committees/:id/projects', requireCommittee, (req, res) => {
   });
 });
 
+function assertMayEditAgenda(user) {
+  if (!may(user, 'editAgenda')) {
+    throw denied('The agenda is set by the dais and the organisers.');
+  }
+}
+
 function ownProject(req) {
   const project = one('SELECT * FROM projects WHERE id = ?', Number(req.params.id));
   if (!project || project.committee_id !== req.user.committee_id) throw missing('Agenda item not found.');
@@ -314,6 +344,7 @@ function ownProject(req) {
  */
 orgRoutes.patch('/projects/:id', requireCommittee, (req, res) => {
   const project = ownProject(req);
+  assertMayEditAgenda(req.user);
   const name = str(req.body, 'name', { max: 200 });
 
   tx(() => {
@@ -339,6 +370,7 @@ orgRoutes.patch('/projects/:id', requireCommittee, (req, res) => {
 /** Only an empty agenda item can go — deleting one would take its work with it. */
 orgRoutes.delete('/projects/:id', requireCommittee, (req, res) => {
   const project = ownProject(req);
+  assertMayEditAgenda(req.user);
   const { count } = one('SELECT COUNT(*) AS count FROM propositions WHERE project_id = ?', project.id);
   if (count > 0) {
     throw conflict(`"${project.name}" still holds ${count} proposition(s). Move or withdraw them first.`);
@@ -358,6 +390,9 @@ orgRoutes.get('/committees/:id/board', requireCommittee, (req, res) => {
       WHERE committee_id = ? ORDER BY position ASC, id ASC`,
     req.user.committee_id
   );
+  const currentProjectId = one(
+    'SELECT current_project_id FROM committees WHERE id = ?', req.user.committee_id
+  ).current_project_id;
   const rows = all(
     `SELECT p.*, pr.name AS project_name, pr.committee_id
        FROM propositions p
@@ -375,6 +410,7 @@ orgRoutes.get('/committees/:id/board', requireCommittee, (req, res) => {
     byProject.get(row.project_id)?.push(serializeProposition(row, req.user));
   }
   res.json({
+    current_project_id: currentProjectId,
     projects: projects.map((p) => ({ ...p, propositions: byProject.get(p.id) })),
     teams: all(
       'SELECT id, country_name FROM teams WHERE committee_id = ? ORDER BY country_name',
@@ -404,7 +440,7 @@ orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
 
   const delegations = teams.map((team) => ({
     ...team,
-    delegates: all(
+    delegates: withContacts(all(
       `SELECT u.id, u.delegate_name, u.email, u.phone, u.role, m.is_primary
          FROM memberships m
          JOIN users u ON u.id = m.user_id
@@ -412,7 +448,7 @@ orgRoutes.get('/countries/:name', requireCommittee, (req, res) => {
         ORDER BY m.is_primary DESC,
                  CASE u.role WHEN 'delegate' THEN 0 ELSE 1 END, u.delegate_name`,
       team.team_id
-    ).map((delegate) => ({
+    ), req.user, { committeeId: team.committee_id, teamId: team.team_id }).map((delegate) => ({
       ...delegate,
       is_primary: !!delegate.is_primary,
       // Where else this person works, so a delegation can see who to send.
@@ -478,4 +514,28 @@ orgRoutes.delete('/teams/:id/seat', requireUser, (req, res) => {
   if (req.user.team_id === teamId) sit(req.token, {});
 
   res.json({ outcome, user: serializeUser(userFromToken(req.token)) });
+});
+
+/**
+ * Mark which agenda item is on the floor right now, or clear it. The dais does
+ * this as the session runs; `permissions.setCurrentTopic` says who may.
+ */
+orgRoutes.patch('/committees/:id/current-topic', requireCommittee, (req, res) => {
+  assertMember(req.user, req.params.id);
+  if (!may(req.user, 'setCurrentTopic')) {
+    throw denied('Only the dais marks what the committee is debating.');
+  }
+
+  const raw = req.body?.project_id;
+  let projectId = null;
+  if (raw !== null && raw !== undefined && raw !== '') {
+    projectId = Number(raw);
+    const project = one('SELECT committee_id FROM projects WHERE id = ?', projectId);
+    if (!project || project.committee_id !== req.user.committee_id) {
+      throw missing('That agenda item is not on this committee.');
+    }
+  }
+  run('UPDATE committees SET current_project_id = ? WHERE id = ?',
+    projectId, req.user.committee_id);
+  res.json({ current_project_id: projectId });
 });

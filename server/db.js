@@ -6,7 +6,7 @@ import { randomInt } from 'node:crypto';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const dataDir = resolve(process.env.REDLINE_DATA_DIR || join(here, '..', 'data'));
+export const dataDir = resolve(process.env.REDLINE_DATA_DIR || join(here, '..', 'data'));
 mkdirSync(dataDir, { recursive: true });
 
 export const dbPath = join(dataDir, 'redline.db');
@@ -113,6 +113,9 @@ function migrate() {
   }
   if (!columnsOf('committees').includes('whitelist_enabled')) {
     db.exec('ALTER TABLE committees ADD COLUMN whitelist_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columnsOf('committees').includes('current_project_id')) {
+    db.exec('ALTER TABLE committees ADD COLUMN current_project_id INTEGER REFERENCES projects(id)');
   }
   if (!columnsOf('committees').includes('block_observers')) {
     // A whitelist used to shut observers out on its own; that is now a separate

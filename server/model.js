@@ -1,9 +1,8 @@
 // Domain rules from the build spec §5. Routes stay thin; anything that decides
 // who may do what, or what a state transition means, lives here.
 import { one, all, run } from './db.js';
+import { config } from './config.js';
 import { bad, conflict, denied, missing } from './http.js';
-
-export const SUPPORT_THRESHOLD = 0.20; // §5.4
 
 /* ------------------------------------------------------------------ lookups */
 
@@ -186,7 +185,8 @@ export function clearReadiness(propositionId) {
 /**
  * §5.4 — distinct delegations backing a proposition in either role, over the
  * committee size fixed at creation. A delegation that is both sponsor and
- * signatory counts once.
+ * signatory counts once. The fraction needed is `supportThreshold` in the
+ * configuration file.
  */
 export function supportOf(prop) {
   const totalMembers = one(
@@ -200,12 +200,13 @@ export function supportOf(prop) {
     prop.id
   );
   const percent = totalMembers > 0 ? teams / totalMembers : 0;
+  const threshold = config.supportThreshold;
   return {
     teams,
     total_members: totalMembers,
     percent,
-    threshold: SUPPORT_THRESHOLD,
-    eligible: percent >= SUPPORT_THRESHOLD,
+    threshold,
+    eligible: percent >= threshold,
   };
 }
 

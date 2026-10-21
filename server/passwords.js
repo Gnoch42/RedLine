@@ -1,5 +1,6 @@
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { config } from './config.js';
 import { bad } from './http.js';
 
 const scryptAsync = promisify(scrypt);
@@ -9,12 +10,12 @@ const scryptAsync = promisify(scrypt);
 // stored with the hash so they can be raised later without invalidating what is
 // already on disk.
 const PARAMS = { N: 16384, r: 8, p: 1, keylen: 64 };
-export const MIN_LENGTH = 10;
 
 /** Length over composition rules, as NIST has recommended for years. */
 export function assertUsable(password, { email = '' } = {}) {
-  if (typeof password !== 'string' || password.length < MIN_LENGTH) {
-    throw bad(`A password needs at least ${MIN_LENGTH} characters. Length is what matters — a short phrase beats a mangled word.`);
+  const minLength = config.password.minLength;
+  if (typeof password !== 'string' || password.length < minLength) {
+    throw bad(`A password needs at least ${minLength} characters. Length is what matters — a short phrase beats a mangled word.`);
   }
   if (password.length > 200) throw bad('That password is longer than 200 characters.');
 

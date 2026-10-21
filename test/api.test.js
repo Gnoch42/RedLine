@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { startServer, client } from './helpers.js';
+import { startServer, client, unzipDocument } from './helpers.js';
 
 let server;
 let api;
@@ -852,11 +852,12 @@ test('a delegation can look in on a committee it holds no seat on', async () => 
   assert.equal(after.find((c) => c.id === unep.id).registered_teams, unep.registered_teams);
 
   const { projects } = await api(`/api/committees/${unep.id}/board`, { token: s.japan.token });
-  const refused = await api(`/api/committees/${unep.id}/projects`, {
-    method: 'POST', token: s.japan.token, body: { name: 'Nope' },
-  }).then(() => null).catch((err) => err);
   assert.ok(Array.isArray(projects));
-  assert.equal(refused, null, 'agenda edits are open to anyone in the room');
+  // Reading the room is all it is: the agenda belongs to the dais.
+  const refused = await api(`/api/committees/${unep.id}/projects`, {
+    method: 'POST', token: s.japan.token, body: { name: 'Nope' }, expect: 403,
+  });
+  assert.match(refused.error, /dais and the organisers/);
 
   // Back to its own seat.
   await api('/api/auth/switch', {
@@ -1060,11 +1061,19 @@ test('the sponsors close the text, then the committee signs it', async () => {
   assert.equal(r.proposition.status, 'ready');
 });
 
-test('the committee and its agenda can be corrected after the fact', async () => {
-  // The seat count is the threshold denominator, so changing it moves every
-  // eligibility figure at once: 4 of 20 was enough, 4 of 40 is not.
-  await api(`/api/committees/${s.committeeId}`, {
+test('settings and the agenda are the organisers\' to change', async () => {
+  // Camille was made an administrator earlier; Kenya is a delegate like any
+  // other, and the seat count decides every eligibility figure on the
+  // committee.
+  const refused = await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.kenya.token,
+    body: { name: 'UNDP', description: '', total_members: 40 },
+    expect: 403,
+  });
+  assert.match(refused.error, /administrators/);
+
+  await api(`/api/committees/${s.committeeId}`, {
+    method: 'PATCH', token: s.france.token,
     body: { name: 'UNDP', description: 'UN Development Programme', total_members: 40 },
   });
   let { proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token });
@@ -1074,24 +1083,27 @@ test('the committee and its agenda can be corrected after the fact', async () =>
   assert.equal(proposition.status, 'collecting');
 
   await api(`/api/committees/${s.committeeId}`, {
-    method: 'PATCH', token: s.kenya.token,
+    method: 'PATCH', token: s.france.token,
     body: { name: 'UNDP', description: 'UN Development Programme', total_members: 20 },
   });
   ({ proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token }));
   assert.equal(proposition.support.eligible, true);
   assert.equal(proposition.status, 'ready');
 
-  // An agenda item can be renamed, and removed only while it is empty.
+  // The agenda is open a little wider — the dais runs it — but not to everyone.
+  await api(`/api/committees/${s.committeeId}/projects`, {
+    method: 'POST', token: s.kenya.token, body: { name: 'Not yours' }, expect: 403,
+  });
   const { project } = await api(`/api/committees/${s.committeeId}/projects`, {
-    method: 'POST', token: s.kenya.token, body: { name: 'Typo here' },
+    method: 'POST', token: s.secretariatToken, body: { name: 'Typo here' },
   });
   const renamed = await api(`/api/projects/${project.id}`, {
-    method: 'PATCH', token: s.germany.token, body: { name: 'Debt relief' },
+    method: 'PATCH', token: s.france.token, body: { name: 'Debt relief' },
   });
   assert.equal(renamed.project.name, 'Debt relief');
 
   const busy = await api(`/api/projects/${s.projectId}`, {
-    method: 'DELETE', token: s.kenya.token, expect: 409,
+    method: 'DELETE', token: s.france.token, expect: 409,
   });
   assert.match(busy.error, /still holds/);
 
@@ -1100,15 +1112,81 @@ test('the committee and its agenda can be corrected after the fact', async () =>
   const before = await api(`/api/committees/${s.committeeId}/projects`, { token: s.kenya.token });
   const last = before.projects[before.projects.length - 1];
   await api(`/api/projects/${last.id}`, {
-    method: 'PATCH', token: s.kenya.token, body: { name: last.name, position: 0 },
+    method: 'PATCH', token: s.france.token, body: { name: last.name, position: 0 },
   });
   const moved = await api(`/api/committees/${s.committeeId}/projects`, { token: s.kenya.token });
   assert.equal(moved.projects[0].id, last.id);
   assert.deepEqual(moved.projects.map((p) => p.position), moved.projects.map((_, i) => i));
 
-  await api(`/api/projects/${project.id}`, { method: 'DELETE', token: s.kenya.token });
+  await api(`/api/projects/${project.id}`, { method: 'DELETE', token: s.france.token });
   const { projects } = await api(`/api/committees/${s.committeeId}/projects`, { token: s.kenya.token });
   assert.equal(projects.some((p) => p.id === project.id), false);
+});
+
+test('the dais marks which topic is on the floor', async () => {
+  const board = await api(`/api/committees/${s.committeeId}/board`, { token: s.kenya.token });
+  assert.equal(board.current_project_id, null);
+
+  await api(`/api/committees/${s.committeeId}/current-topic`, {
+    method: 'PATCH', token: s.kenya.token, body: { project_id: s.projectId }, expect: 403,
+  });
+
+  const set = await api(`/api/committees/${s.committeeId}/current-topic`, {
+    method: 'PATCH', token: s.secretariatToken, body: { project_id: s.projectId },
+  });
+  assert.equal(set.current_project_id, s.projectId);
+  const after = await api(`/api/committees/${s.committeeId}/board`, { token: s.kenya.token });
+  assert.equal(after.current_project_id, s.projectId);
+
+  // Only items on this committee, and clearing it is allowed.
+  await api(`/api/committees/${s.committeeId}/current-topic`, {
+    method: 'PATCH', token: s.secretariatToken, body: { project_id: 99999 }, expect: 404,
+  });
+  const cleared = await api(`/api/committees/${s.committeeId}/current-topic`, {
+    method: 'PATCH', token: s.france.token, body: { project_id: null },
+  });
+  assert.equal(cleared.current_project_id, null);
+
+  await api(`/api/committees/${s.committeeId}/current-topic`, {
+    method: 'PATCH', token: s.secretariatToken, body: { project_id: s.projectId },
+  });
+});
+
+test('a working paper is exported once it has the support to be presented', async () => {
+  // #2 is ready; the one still being negotiated is not.
+  const { propositions } = await api(`/api/projects/${s.projectId}/propositions`, {
+    token: s.kenya.token,
+  });
+  const notYet = propositions.find((p) => !p.support.eligible);
+  if (notYet) {
+    const refused = await api(`/api/propositions/${notYet.id}/working-paper.docx`, {
+      token: s.kenya.token, expect: 409,
+    });
+    assert.match(refused.error, /support to be presented/);
+  }
+
+  const res = await fetch(`${server.base}/api/propositions/${s.propId}/working-paper.docx`, {
+    headers: { authorization: `Bearer ${s.kenya.token}` },
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /wordprocessingml\.document/);
+  assert.match(res.headers.get('content-disposition'), /^attachment; filename\*=UTF-8''/);
+
+  // A .docx is a zip; its first bytes say so, and the body text is in there.
+  const buffer = Buffer.from(await res.arrayBuffer());
+  assert.equal(buffer.subarray(0, 2).toString(), 'PK');
+  assert.ok(buffer.length > 3000, 'a real document, not an empty shell');
+
+  const xml = await unzipDocument(buffer);
+  assert.match(xml, /Committee:/);
+  assert.match(xml, /Topic:/);
+  assert.match(xml, /Sponsors:/);
+  assert.match(xml, /Signatories:/);
+  // Sponsors and signatories go in alphabetical order, as the template asks.
+  const sponsors = xml.match(/Sponsors:\s*<\/w:t>[\s\S]*?<w:t[^>]*>([^<]*)</)?.[1];
+  assert.ok(sponsors, 'the sponsor line carries names');
+  assert.deepEqual(sponsors.split(', '), [...sponsors.split(', ')].sort());
+
 });
 
 test('a delegate can give up a seat, and the country gets it back', async () => {

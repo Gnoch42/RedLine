@@ -119,6 +119,28 @@ Sign out and back in, and an **Admin** button appears. From there you can reset 
 people's passwords and appoint more administrators. Do this before the conference: without
 an administrator, nobody can help a delegate who forgets their password.
 
+## 8. Set the conference's own rules
+
+The first start wrote a commented configuration file onto the data volume. Read it, and
+change what your conference needs — the support threshold, who may draft, how far contact
+details travel:
+
+```bash
+docker compose exec app cat /data/redline.config.js
+```
+
+To edit it, copy it out, change it, and copy it back — then restart so it is re-read:
+
+```bash
+docker compose cp app:/data/redline.config.js ./redline.config.js
+nano redline.config.js
+docker compose cp ./redline.config.js app:/data/redline.config.js
+docker compose restart app
+```
+
+A value it cannot make sense of is reported in `docker compose logs app` and replaced with
+the default, so a typo costs you a warning rather than the site.
+
 ---
 
 ## Backups
@@ -173,7 +195,8 @@ left behind they would be replayed over the one you restored.
 
 ## Updating to a newer version
 
-Back up first, then from the repository root:
+Back up first, then from the repository root (your `redline.config.js` is on the data
+volume, so an update leaves it alone):
 
 ```bash
 git pull

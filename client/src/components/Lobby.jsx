@@ -39,7 +39,9 @@ const ROLES = [
 ];
 
 function Credentials({ onAuthenticated, prefillJoinCode }) {
-  const [mode, setMode] = useState(prefillJoinCode ? 'login' : 'register');
+  // Most arrivals are people coming back, so signing in is the front door and
+  // creating an account is the thing you click through to.
+  const [mode, setMode] = useState('login');
   const [country, setCountry] = useState('');
   const [role, setRole] = useState('delegate');
   const staff = role === 'secretariat';

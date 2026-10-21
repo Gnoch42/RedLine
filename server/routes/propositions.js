@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { one, all, run, tx } from '../db.js';
 import { bad, conflict, missing, str } from '../http.js';
 import { requireCommittee, requireDelegation } from '../auth.js';
+import { nmunWorkingPaper, paperFilename } from '../export-nmun.js';
 import {
   getProposition, assertPropositionVisible, serializeProposition, assertSponsor, isSponsor,
   versionsOf, versionNumber, newVersion, recordApproval, dropApproval, approvalsFor,
@@ -127,6 +128,44 @@ propositionRoutes.get('/propositions/:id/versions/:versionId', requireCommittee,
       markdown_content: version.markdown_content,
     },
   });
+});
+
+/**
+ * The working paper, on the NMUN template, ready to hand to the Dais. Offered
+ * once enough of the committee is behind it to be presented — before that
+ * there is no paper to submit, only a draft being argued over.
+ */
+propositionRoutes.get('/propositions/:id/working-paper.docx', requireCommittee, async (req, res) => {
+  const prop = visibleProposition(req.params.id, req.user);
+  const serialized = serializeProposition(prop, req.user, { includeContent: true });
+
+  if (!serialized.support.eligible) {
+    const needed = Math.ceil(serialized.support.total_members * serialized.support.threshold);
+    throw conflict(
+      `A working paper is exported once it has the support to be presented: ${needed} of `
+      + `${serialized.support.total_members} delegations. This one has ${serialized.support.teams}.`
+    );
+  }
+
+  const committee = one('SELECT name FROM committees WHERE id = ?', prop.committee_id);
+  const context = {
+    committeeName: committee.name,
+    topic: serialized.project_name,
+    name: serialized.name,
+  };
+
+  const buffer = await nmunWorkingPaper({ proposition: serialized, ...context });
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  );
+  // Quoted and ASCII-escaped: committee names carry accents, and an unescaped
+  // quote in a header is how a filename becomes two headers.
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(paperFilename(context))}`
+  );
+  res.send(buffer);
 });
 
 /* ------------------------------------------------------- transitions */
