@@ -4,8 +4,11 @@
 
 CREATE TABLE IF NOT EXISTS committees (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- The short name everything in the interface uses: UNDP, UNEP, ECOSOC.
   name           TEXT    NOT NULL,
-  description    TEXT    NOT NULL DEFAULT '',
+  -- The name a resolution opens with, as the Background Guide lists it:
+  -- "United Nations Development Programme". Falls back to the short one.
+  formal_name    TEXT    NOT NULL DEFAULT '',
   -- Threshold denominator (§5.4). Set once at creation; deliberately NOT the
   -- number of currently registered teams.
   total_members  INTEGER NOT NULL,

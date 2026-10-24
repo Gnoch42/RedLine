@@ -90,8 +90,8 @@ dependency, nothing to compile. Separately from all three roles, an account can 
 locked out. That is orthogonal on purpose — an administrator is usually also a delegate or on
 the secretariat, and it is the keys to the instance rather than standing in a committee.
 
-1. One person **creates the committee**: its name, how many countries are seated in it,
-   and the agenda items.
+1. One person **creates the committee**: its short name, the full name a resolution opens
+   with, how many countries are seated in it, and the agenda items.
 2. Everyone else **picks it from the list** of committees, which every signed-in delegate
    sees. Joining is one click: the country comes from the account, and the ones already
    spoken for on that committee are shown but cannot be picked, so a clash is visible
@@ -217,7 +217,8 @@ What it governs:
 - **`password`** — minimum length, how many wrong guesses pause an account and for how long,
   and how long an administrator's reset code stays usable.
 - **`export`** — the opening line of the working paper, and whether to keep the template's
-  "Code:" line and its affirmation.
+  "Code:" line and its affirmation. The `{committee}` in the opening line is the committee's
+  full name.
 
 ## Passwords, and getting back in
 
@@ -244,6 +245,18 @@ stand down — somebody has to be holding the keys.
 Repeated wrong guesses on an account are slowed to a stop for a minute at a time. Accounts
 created before passwords existed set one by presenting the code they used to sign in with;
 once an account has a password, only a reset code will replace it.
+
+## Writing a clause
+
+The editor is a plain Markdown box with the few marks a resolution needs above it: **bold**
+for the operative verb, *italic* for the preambular lead-in, and numbering that nests the way
+the template does. Indent a numbered clause and it becomes a sub-clause — `1.` turns into
+`a.`, and `a.` into `i.`, in the exported paper. Numbering is kept in order across the whole
+text as you move clauses around, so outdenting one cannot leave its old neighbours counting
+from the wrong place.
+
+The text stays Markdown throughout: it is what versions are diffed on, and what the exporter
+reads.
 
 ## Submitting a working paper
 
@@ -315,6 +328,9 @@ Places where the build spec was silent, or where the implementation makes a call
 - **Propositions and amendments have a title and no description.** A title that says what
   the text does carries the explorer card on its own; a second summary field was one more
   thing to write and to keep true.
+- **A committee has two names, and no description.** The short one is what the interface
+  uses; the full one is what a resolution opens with, as the Background Guide lists it. The
+  free description it replaced was being used for the full name anyway.
 - **Countries are picked from a list, never typed**, and the list is a plain file —
   `client/src/lib/countries.js`. A conference that uses the long UN protocol forms, or that
   seats observers of its own, edits that one file. The server stores whatever is chosen as
@@ -401,7 +417,8 @@ server/           Express API. routes/ is thin; model.js holds the rules above.
                   commented template copied into the data directory.
   export-nmun.js  Markdown in, NMUN working paper out.
 client/src/       React app. components/ is the three-panel UI, lib/ the diff,
-                  Markdown rendering, polling helpers and the country list.
+                  Markdown rendering, polling helpers, the clause numbering behind the
+                  editor's toolbar, and the country list.
 test/             HTTP-level tests of the business rules.
 scripts/seed.js   The worked example. Never against a real server.
 scripts/admin.js  Administrators, from the machine that runs the server.
@@ -430,7 +447,7 @@ POST   /api/auth/admin/users/:id/admin     { is_admin }  appoint or stand down
 GET    /api/committees                 every committee, with seats taken and your own
 GET    /api/countries/:name            who speaks for a country, on every committee
 POST   /api/committees                 create a committee and its first delegation
-PATCH  /api/committees/:id             { name, description, total_members,
+PATCH  /api/committees/:id             { name, formal_name, total_members,
                                          whitelist_enabled, whitelist: [country] }
 POST   /api/teams                      { committee_id | committee_code } — under your country
 POST   /api/teams/join                 { join_code }

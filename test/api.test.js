@@ -58,7 +58,7 @@ test('a delegate registers, founds a committee and gets both codes', async () =>
     token: s.france.token,
     body: {
       name: 'UNDP',
-      description: 'UN Development Programme',
+      formal_name: 'United Nations Development Programme',
       total_members: 20,
       country_name: 'France',
       projects: ['Climate finance', 'Digital divide'],
@@ -286,7 +286,7 @@ test('one delegate can hold seats on several committees and move between them', 
   // Camille founded UNDP for France; here she also takes a seat on UNEP.
   const { user: founded } = await api('/api/committees', {
     method: 'POST', token: s.france.token,
-    body: { name: 'UNEP', description: '', total_members: 10, country_name: 'France' },
+    body: { name: 'UNEP', formal_name: '', total_members: 10, country_name: 'France' },
   });
   assert.equal(founded.committee.name, 'UNEP');
   assert.equal(founded.seats.length, 2);
@@ -702,7 +702,7 @@ test('committee membership is a wall: outsiders see nothing', async () => {
   const outsiderToken = await register('sam@example.org', 'Sam', 'Norway');
   await api('/api/committees', {
     method: 'POST', token: outsiderToken,
-    body: { name: 'UNESCO', description: '', total_members: 10, country_name: 'Norway' },
+    body: { name: 'UNESCO', formal_name: '', total_members: 10, country_name: 'Norway' },
   });
   await api(`/api/propositions/${s.propId}`, { token: outsiderToken, expect: 404 });
   await api(`/api/projects/${s.projectId}/propositions`, { token: outsiderToken, expect: 404 });
@@ -873,7 +873,7 @@ test('a whitelist decides who may sit, and separately who may look in', async ()
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
     body: {
-      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      name: 'UNDP', formal_name: 'United Nations Development Programme', total_members: 20,
       whitelist_enabled: true, whitelist: listed,
     },
   });
@@ -901,7 +901,7 @@ test('a whitelist decides who may sit, and separately who may look in', async ()
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
     body: {
-      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      name: 'UNDP', formal_name: 'United Nations Development Programme', total_members: 20,
       whitelist_enabled: true, block_observers: true, whitelist: listed,
     },
   });
@@ -925,7 +925,7 @@ test('a whitelist decides who may sit, and separately who may look in', async ()
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
     body: {
-      name: 'UNDP', description: 'UN Development Programme', total_members: 20,
+      name: 'UNDP', formal_name: 'United Nations Development Programme', total_members: 20,
       whitelist_enabled: false, whitelist: listed,
     },
   });
@@ -936,7 +936,7 @@ test('a committee can be founded with its roster already closed', async () => {
   const { user } = await api('/api/committees', {
     method: 'POST', token,
     body: {
-      name: 'ECOSOC', description: '', total_members: 12,
+      name: 'ECOSOC', formal_name: '', total_members: 12,
       whitelist_enabled: true, block_observers: true, whitelist: ['Sweden', 'Norway'],
     },
   });
@@ -1067,14 +1067,14 @@ test('settings and the agenda are the organisers\' to change', async () => {
   // committee.
   const refused = await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.kenya.token,
-    body: { name: 'UNDP', description: '', total_members: 40 },
+    body: { name: 'UNDP', formal_name: '', total_members: 40 },
     expect: 403,
   });
   assert.match(refused.error, /administrators/);
 
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
-    body: { name: 'UNDP', description: 'UN Development Programme', total_members: 40 },
+    body: { name: 'UNDP', formal_name: 'United Nations Development Programme', total_members: 40 },
   });
   let { proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token });
   assert.equal(proposition.support.total_members, 40);
@@ -1084,7 +1084,7 @@ test('settings and the agenda are the organisers\' to change', async () => {
 
   await api(`/api/committees/${s.committeeId}`, {
     method: 'PATCH', token: s.france.token,
-    body: { name: 'UNDP', description: 'UN Development Programme', total_members: 20 },
+    body: { name: 'UNDP', formal_name: 'United Nations Development Programme', total_members: 20 },
   });
   ({ proposition } = await api(`/api/propositions/${s.propId}`, { token: s.kenya.token }));
   assert.equal(proposition.support.eligible, true);
@@ -1178,6 +1178,8 @@ test('a working paper is exported once it has the support to be presented', asyn
   assert.ok(buffer.length > 3000, 'a real document, not an empty shell');
 
   const xml = await unzipDocument(buffer);
+  // The committee's full name is what a resolution opens with.
+  assert.match(xml, /The United Nations Development Programme,/);
   assert.match(xml, /Committee:/);
   assert.match(xml, /Topic:/);
   assert.match(xml, /Sponsors:/);

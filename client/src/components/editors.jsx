@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Modal } from './Modal.jsx';
 import { MarkdownBody, DiffBody, DiffSummary } from './DocumentSheet.jsx';
+import { MarkdownEditor } from './MarkdownEditor.jsx';
 
 function useForm(initial) {
   const [values, setValues] = useState(initial);
@@ -71,7 +72,7 @@ export function PropositionEditor({ title, subtitle, initial, submitLabel, onSub
         {preview ? (
           <div className="editor-preview"><MarkdownBody content={values.content} /></div>
         ) : (
-          <textarea
+          <MarkdownEditor
             value={values.content}
             onChange={set('content')}
             style={{ minHeight: 320 }}
@@ -138,7 +139,7 @@ export function AmendmentEditor({ title, subtitle, base, baseLabel, initial, sub
           <span className="label" style={{ display: 'block', marginBottom: 5 }}>
             Your text — edit the draft in place
           </span>
-          <textarea value={values.content} onChange={set('content')} />
+          <MarkdownEditor value={values.content} onChange={set('content')} />
         </div>
         <div>
           <span className="label" style={{ display: 'block', marginBottom: 5 }}>

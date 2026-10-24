@@ -88,7 +88,7 @@ const main = async () => {
     method: 'POST', token: founder,
     body: {
       name: `UNDP ${stamp.toUpperCase()}`,
-      description: 'UN Development Programme',
+      formal_name: 'United Nations Development Programme',
       total_members: 20,
       country_name: 'France',
       projects: ['Climate finance', 'Digital divide', 'Debt relief'],

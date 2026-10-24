@@ -19,16 +19,16 @@ before(async () => {
 
 after(() => rmSync(dataDir, { recursive: true, force: true }));
 
-const paper = (markdown, extra = {}) => nmunWorkingPaper({
+const paper = (markdown, context = {}) => nmunWorkingPaper({
   proposition: {
     name: 'Resolution on climate finance',
     sponsors: [{ country_name: 'France' }, { country_name: 'Brazil' }],
     signatories: [{ country_name: 'Kenya' }, { country_name: 'Germany' }],
     current_version: { markdown_content: markdown },
-    ...extra,
   },
   committeeName: 'UNDP',
   topic: 'Climate finance',
+  ...context,
 });
 
 test('operative clauses keep their three levels of numbering', async () => {
@@ -67,6 +67,17 @@ test('the header block follows the template, alphabetically', async () => {
   assert.match(xml, /The UNDP,/);
 });
 
+test('a resolution opens with the committee\'s full name', async () => {
+  const xml = await unzipDocument(await paper('A single clause.', {
+    committeeName: 'United Nations Development Programme',
+  }));
+  assert.match(xml, /The United Nations Development Programme,/);
+  // And it is the name the header block carries too.
+  const field = (label) =>
+    xml.match(new RegExp(`${label}:\\s*</w:t>[\\s\\S]*?<w:t[^>]*>([^<]*)<`))?.[1];
+  assert.equal(field('Committee'), 'United Nations Development Programme');
+});
+
 test('a filename survives accents, punctuation and path separators', () => {
   assert.equal(
     paperFilename({ committeeName: 'UNDP • NY', topic: 'Climate/finance', name: 'Résolution: 1' }),
@@ -93,7 +104,7 @@ test('the configuration moves the bar for presenting, and who may draft', async 
     const france = await register('c@example.org', 'Camille', 'France');
     await api('/api/committees', {
       method: 'POST', token: france,
-      body: { name: 'UNDP', description: '', total_members: 4, projects: ['Climate finance'] },
+      body: { name: 'UNDP', formal_name: '', total_members: 4, projects: ['Climate finance'] },
     });
     const { user } = await api('/api/auth/me', { token: france });
     const { projects } = await api(`/api/committees/${user.committee.id}/projects`, { token: france });

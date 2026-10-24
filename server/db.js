@@ -114,6 +114,19 @@ function migrate() {
   if (!columnsOf('committees').includes('whitelist_enabled')) {
     db.exec('ALTER TABLE committees ADD COLUMN whitelist_enabled INTEGER NOT NULL DEFAULT 0');
   }
+  // A committee used to carry a free description. What it was actually used
+  // for was its full name, which is what a resolution opens with — so that is
+  // what the column becomes.
+  if (!columnsOf('committees').includes('formal_name')) {
+    db.exec("ALTER TABLE committees ADD COLUMN formal_name TEXT NOT NULL DEFAULT ''");
+    if (columnsOf('committees').includes('description')) {
+      db.exec('UPDATE committees SET formal_name = description');
+    }
+  }
+  if (columnsOf('committees').includes('description')) {
+    db.exec('ALTER TABLE committees DROP COLUMN description');
+  }
+
   if (!columnsOf('committees').includes('current_project_id')) {
     db.exec('ALTER TABLE committees ADD COLUMN current_project_id INTEGER REFERENCES projects(id)');
   }

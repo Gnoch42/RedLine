@@ -147,9 +147,12 @@ propositionRoutes.get('/propositions/:id/working-paper.docx', requireCommittee, 
     );
   }
 
-  const committee = one('SELECT name FROM committees WHERE id = ?', prop.committee_id);
+  const committee = one('SELECT name, formal_name FROM committees WHERE id = ?', prop.committee_id);
   const context = {
-    committeeName: committee.name,
+    // The opening line wants the full name from the Background Guide; the
+    // filename and the short name are for people, not for the Dais.
+    committeeName: committee.formal_name?.trim() || committee.name,
+    shortName: committee.name,
     topic: serialized.project_name,
     name: serialized.name,
   };
@@ -163,7 +166,9 @@ propositionRoutes.get('/propositions/:id/working-paper.docx', requireCommittee, 
   // quote in a header is how a filename becomes two headers.
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename*=UTF-8''${encodeURIComponent(paperFilename(context))}`
+    `attachment; filename*=UTF-8''${encodeURIComponent(paperFilename({
+      ...context, committeeName: committee.name,
+    }))}`
   );
   res.send(buffer);
 });

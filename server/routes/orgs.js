@@ -65,7 +65,7 @@ function assertMember(user, committeeId) {
  */
 orgRoutes.post('/committees', requireUser, (req, res) => {
   const name = str(req.body, 'name', { max: 120 });
-  const description = str(req.body, 'description', { required: false, max: 2000 });
+  const formalName = str(req.body, 'formal_name', { required: false, max: 300 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
   const countryName = ownCountry(req.user);
   const projects = Array.isArray(req.body?.projects) ? req.body.projects : [];
@@ -74,9 +74,9 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
   const result = tx(() => {
     const committeeCode = uniqueCode('committees', 'committee_code');
     const cttee = run(
-      `INSERT INTO committees (name, description, total_members, committee_code)
+      `INSERT INTO committees (name, formal_name, total_members, committee_code)
        VALUES (?, ?, ?, ?)`,
-      name, description, totalMembers, committeeCode
+      name, formalName, totalMembers, committeeCode
     );
     const committeeId = Number(cttee.lastInsertRowid);
 
@@ -113,7 +113,7 @@ orgRoutes.post('/committees', requireUser, (req, res) => {
  */
 orgRoutes.get('/committees', requireUser, (req, res) => {
   const committees = all(
-    `SELECT c.id, c.name, c.description, c.total_members, c.created_at,
+    `SELECT c.id, c.name, c.formal_name, c.total_members, c.created_at,
             c.whitelist_enabled, c.block_observers,
             (SELECT COUNT(*) FROM teams t WHERE t.committee_id = c.id) AS registered_teams,
             (SELECT m.team_id FROM memberships m
@@ -239,7 +239,7 @@ orgRoutes.get('/committees/:id', requireCommittee, (req, res) => {
     committee: {
       id: cttee.id,
       name: cttee.name,
-      description: cttee.description,
+      formal_name: cttee.formal_name,
       total_members: cttee.total_members,
       committee_code: cttee.committee_code,
       registered_teams: teams.length,
@@ -275,11 +275,11 @@ orgRoutes.patch('/committees/:id', requireCommittee, (req, res) => {
     throw denied('Committee settings are for administrators of this installation.');
   }
   const name = str(req.body, 'name', { max: 120 });
-  const description = str(req.body, 'description', { required: false, max: 2000 });
+  const formalName = str(req.body, 'formal_name', { required: false, max: 300 });
   const totalMembers = int(req.body, 'total_members', { min: 1, max: 2000 });
   tx(() => {
-    run('UPDATE committees SET name = ?, description = ?, total_members = ? WHERE id = ?',
-      name, description, totalMembers, req.user.committee_id);
+    run('UPDATE committees SET name = ?, formal_name = ?, total_members = ? WHERE id = ?',
+      name, formalName, totalMembers, req.user.committee_id);
     setRoster(req.user.committee_id, req.body);
   });
   // The threshold moved under every proposition here, so some may have crossed

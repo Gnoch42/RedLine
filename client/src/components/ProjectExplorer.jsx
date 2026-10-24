@@ -31,7 +31,7 @@ export function ProjectExplorer({ board, committee, selectedId, onSelect, onNewP
     <section className="panel panel--left">
       <div className="panel__head">
         <h2>{committee.name}</h2>
-        <div className="sub">{committee.description || 'Agenda and propositions'}</div>
+        <div className="sub">{committee.formal_name || 'Agenda and propositions'}</div>
         <div className="panel__toolbar">
           <select
             value={status}

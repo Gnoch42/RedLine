@@ -25,7 +25,7 @@ function SettingsReadOnly({ committee, data }) {
       <div className="rows">
         <div className="row"><strong style={{ flex: 1 }}>Name</strong>{committee.name}</div>
         <div className="row">
-          <strong style={{ flex: 1 }}>Description</strong>{committee.description || '—'}
+          <strong style={{ flex: 1 }}>Full name</strong>{committee.formal_name || committee.name}
         </div>
         <div className="row">
           <strong style={{ flex: 1 }}>Seats</strong>
@@ -50,7 +50,7 @@ function SettingsReadOnly({ committee, data }) {
 function Settings({ committee, data, onSaved }) {
   const [values, setValues] = useState({
     name: committee.name,
-    description: committee.description || '',
+    formal_name: committee.formal_name || '',
     total_members: committee.total_members,
   });
   const [restricted, setRestricted] = useState(!!committee.whitelist_enabled);
@@ -106,8 +106,16 @@ function Settings({ committee, data, onSaved }) {
         <input value={values.name} onChange={set('name')} />
       </label>
       <label className="field">
-        <span className="label">Description</span>
-        <input value={values.description} onChange={set('description')} />
+        <span className="label">Full name, for the top of resolutions</span>
+        <input
+          value={values.formal_name}
+          onChange={set('formal_name')}
+          placeholder={committee.name}
+        />
+        <span className="hint">
+          What a working paper opens with: “The {values.formal_name.trim() || committee.name},”.
+          Leave it empty to use the short name.
+        </span>
       </label>
       <label className="field">
         <span className="label">Seats in committee</span>

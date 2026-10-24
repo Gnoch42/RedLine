@@ -99,7 +99,7 @@ export function userFromToken(token) {
             s.active_team_id AS team_id,
             s.active_committee_id AS committee_id,
             t.country_name, t.join_code,
-            c.name AS committee_name, c.description AS committee_description,
+            c.name AS committee_name, c.formal_name AS committee_formal_name,
             c.total_members, c.committee_code, c.whitelist_enabled, c.block_observers
        FROM sessions s
        JOIN users u ON u.id = s.user_id
@@ -227,7 +227,7 @@ export function serializeUser(user) {
       ? {
           id: user.committee_id,
           name: user.committee_name,
-          description: user.committee_description,
+          formal_name: user.committee_formal_name,
           total_members: user.total_members,
           committee_code: user.committee_code,
           whitelist_enabled: !!user.whitelist_enabled,

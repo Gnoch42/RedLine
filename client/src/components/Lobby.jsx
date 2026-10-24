@@ -322,7 +322,7 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
       <>
         <div className="chosen">
           <div className="chosen__name">{chosen.name}</div>
-          {chosen.description && <div className="chosen__desc">{chosen.description}</div>}
+          {chosen.formal_name && <div className="chosen__desc">{chosen.formal_name}</div>}
           <div className="chosen__meta">
             {chosen.registered_teams} of {chosen.total_members} seats registered
           </div>
@@ -373,7 +373,7 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
 
   const needle = filter.trim().toLowerCase();
   const shown = needle
-    ? committees.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(needle))
+    ? committees.filter((c) => `${c.name} ${c.formal_name}`.toLowerCase().includes(needle))
     : committees;
 
   return (
@@ -390,7 +390,7 @@ function JoinCommittee({ me, onUser, onSwitched, onOpenCommittee }) {
           <button key={committee.id} className="seat seat--committee" onClick={() => choose(committee)}>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span className="seat__country">{committee.name}</span>
-              {committee.description && <span className="seat__desc">{committee.description}</span>}
+              {committee.formal_name && <span className="seat__desc">{committee.formal_name}</span>}
             </span>
             <span className="seat__committee">
               {!staff && committee.my_team_id
@@ -417,7 +417,7 @@ function CreateCommittee({ me, onUser }) {
       method: 'POST',
       body: {
         name: data.get('name'),
-        description: data.get('description'),
+        formal_name: data.get('formal_name'),
         total_members: Number(data.get('total_members')),
         whitelist_enabled: restricted,
         block_observers: blockObservers,
@@ -435,8 +435,13 @@ function CreateCommittee({ me, onUser }) {
         <input name="name" required placeholder="UNDP" />
       </label>
       <label className="field">
-        <span className="label">Description</span>
-        <input name="description" placeholder="UN Development Programme" />
+        <span className="label">Full name, for the top of resolutions</span>
+        <input name="formal_name" placeholder="United Nations Development Programme" />
+        <span className="hint">
+          As the Background Guide lists it. A working paper opens with it — “The United Nations
+          Development Programme,” — while the short name above is what you see everywhere else.
+          Leave it empty to use the short name for both.
+        </span>
       </label>
       <label className="field">
         <span className="label">Seats in committee</span>
